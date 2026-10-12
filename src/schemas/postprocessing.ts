@@ -3,7 +3,7 @@
  */
 
 import { z } from "zod";
-import { AIModel, RemeshFormat, OriginAt, TextureResolution, Topology, AnimationPostProcessOp } from "../constants.js";
+import { AIModel, OriginAt, TextureResolution, Topology, AnimationPostProcessOp } from "../constants.js";
 import { ResponseFormatSchema, UrlSchema } from "./common.js";
 
 /**
@@ -13,13 +13,13 @@ export const RemeshInputSchema = z.object({
   input_task_id: z.string()
     .min(1)
     .optional()
-    .describe("Task ID of an existing completed task to remesh"),
+    .describe("ID of a SUCCEEDED text-to-3d (preview or refine), image-to-3d or retexture task to remesh"),
   model_url: UrlSchema
     .optional()
-    .describe("Direct URL to a model file to remesh"),
+    .describe("Public URL or data URI of a model to remesh (.glb / .gltf / .obj / .fbx / .stl, max 100 MB)"),
   target_formats: z.array(z.enum(["glb", "fbx", "obj", "usdz", "blend", "stl", "3mf"]))
     .default(["glb"])
-    .describe("Output formats to generate (default: ['glb']). NOTE: 3MF is NOT included by default — you MUST explicitly include '3mf' to receive it."),
+    .describe("Output formats to generate (default: ['glb']): glb, fbx, obj, usdz, blend, stl, 3mf. 3MF is only produced when listed."),
   topology: z.nativeEnum(Topology)
     .optional()
     .describe("Mesh topology type (quad or triangle)"),
@@ -36,20 +36,23 @@ export const RemeshInputSchema = z.object({
     .optional()
     .describe("Adaptive decimation polycount level (1=ultra, 2=high, 3=medium, 4=low). When set, target_polycount is ignored."),
   resize_height: z.number()
-    .default(0)
-    .describe("Resize model to this height in meters (0 = no resize). Mutually exclusive with auto_size."),
+    .optional()
+    .describe("DEPRECATED — use meshy_resize. Resize the model to this height in meters. Not combinable with auto_size."),
   resize_longest_side: z.number()
     .optional()
-    .describe("Resize so the model's longest side matches this value in meters (aspect ratio preserved). Alternative to resize_height."),
+    .describe("DEPRECATED — use meshy_resize. Resize so the longest side matches this value in meters."),
   auto_size: z.boolean()
     .optional()
-    .describe("Use AI to auto-estimate real-world height. Mutually exclusive with resize_height. Default false."),
+    .describe("DEPRECATED — use meshy_resize. Estimate the real-world height with AI and resize to it."),
   origin_at: z.nativeEnum(OriginAt)
     .optional()
-    .describe("Where to place the model origin: 'bottom' or 'center'. Default 'bottom' when auto_size is true."),
+    .describe("DEPRECATED — use meshy_resize. Origin position: 'bottom' or 'center'."),
   convert_format_only: z.boolean()
-    .default(false)
-    .describe("Only convert format without remeshing"),
+    .optional()
+    .describe("DEPRECATED — use meshy_convert (1 credit instead of 5). Only change the file format, ignoring remesh options."),
+  alpha_thumbnail: z.boolean()
+    .optional()
+    .describe("Also render a transparent-background (RGBA) preview, returned as alpha_thumbnail_url. Default false."),
   response_format: ResponseFormatSchema
 }).strict();
 
@@ -87,7 +90,7 @@ export const RetextureInputSchema = z.object({
     .describe("Enable physically-based rendering textures"),
   texture_resolution: z.nativeEnum(TextureResolution)
     .optional()
-    .describe("Base color texture resolution: '2k' (default), '4k', or '8k'. 8K costs 15 credits instead of 10 — confirm with the user before selecting it. 4k/8k need meshy-6 / meshy-7 / latest (not meshy-6-lite); PBR maps stay at 2K. Replaces the deprecated hd_texture flag."),
+    .describe("Base color texture resolution: '2k' (default), '4k', or '8k'. 8K costs 15 credits instead of 10 — confirm with the user before selecting it. 4k/8k need meshy-6 / meshy-7 / latest (not meshy-6-lite); at 8k the PBR maps are 4K and there is no emission map. Replaces the deprecated hd_texture flag."),
   hd_texture: z.boolean()
     .optional()
     .describe("DEPRECATED — use texture_resolution instead (hd_texture: true is exactly texture_resolution: '4k'). Kept for backward compatibility."),

@@ -71,7 +71,7 @@ Retexture is 10 credits (15 at 8K). Creative Lab is **36** credits for every pro
 ## Prerequisites
 
 - Node.js >= 18
-- A Meshy API key ([get one here](https://www.meshy.ai/settings/api) — requires Pro plan or above)
+- A Meshy API key ([get one here](https://www.meshy.ai/developers/keys) — requires Pro plan or above)
 
 ## Installation
 
@@ -156,7 +156,7 @@ Most clients auto-load the new server, but **Cursor and VS Code require a manual
 - **`spawn npx ENOENT`** (Windows) — wrap with `cmd /c` (see Cursor block above).
 - **`error: unknown option '-y'`** (Claude Code on Windows) — use `claude mcp add-json` instead of `claude mcp add … -- npx -y …`.
 - **Cursor doesn't list `meshy`** — make sure `mcp.json` is valid JSON (no trailing commas), then fully restart Cursor.
-- **`Authentication failed: the Meshy API rejected MESHY_API_KEY (401)`** — the key is mistyped, revoked or expired. Regenerate at https://www.meshy.ai/settings/api, update your config and restart the server.
+- **`Authentication failed: the Meshy API rejected MESHY_API_KEY (401)`** — the key is mistyped, revoked or expired. Regenerate at https://www.meshy.ai/developers/keys, update your config and restart the server.
 
 ## Configuration
 

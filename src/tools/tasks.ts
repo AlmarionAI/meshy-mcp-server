@@ -129,6 +129,24 @@ async function downloadFileToLocal(url: string, saveTo: string): Promise<number>
   });
 }
 
+const RETENTION_MS = 3 * 24 * 60 * 60 * 1000;
+
+/**
+ * When the task's download URLs stop working: the API's own expires_at, else
+ * 3 days after finished_at (API docs: asset retention; Enterprise accounts
+ * keep results indefinitely).
+ */
+function expiresAt(task: Task): string | undefined {
+  if (task.expires_at) return new Date(task.expires_at).toISOString();
+  const finished = typeof task.finished_at === "number" ? task.finished_at : Date.parse(task.finished_at ?? "");
+  return finished > 0 ? new Date(finished + RETENTION_MS).toISOString() : undefined;
+}
+
+function expiryNote(task: Task): string {
+  const at = expiresAt(task);
+  return `**Note**: The Meshy download URLs stop working${at ? ` at ${at}` : ""} (results are kept for 3 days after the task finishes). Local files are permanent.`;
+}
+
 /**
  * Render a progress bar
  */
@@ -813,66 +831,87 @@ Error Handling:
   server.registerTool(
     "meshy_cancel_task",
     {
-      title: "Cancel Generation Task",
-      description: `Cancel a pending or in-progress 3D generation task.
+      title: "Cancel or Delete Task",
+      description: `Cancel a queued task, or delete a finished one. What happens depends on the task:
 
-This tool cancels a task that is currently PENDING or IN_PROGRESS. Completed or failed tasks cannot be canceled.
+Creative Lab tasks (task_type "creative-lab-..."):
+  - PENDING → canceled, credits refunded
+  - IN_PROGRESS → canceled, credits NOT refunded
+  - SUCCEEDED / FAILED / CANCELED → cannot be canceled
+
+Every other task:
+  - PENDING → deleted, credits refunded
+  - IN_PROGRESS → refused: the task keeps running and its credits are not refundable. Wait until it finishes
+  - SUCCEEDED / FAILED / CANCELED → PERMANENTLY deleted with its files, no refund. Requires confirm_delete: true — ask the user first
 
 Args:
-  - task_id (string): Task ID to cancel (required)
+  - task_id (string): Task ID (required)
   - task_type (enum, optional): Task type for endpoint routing. If omitted or wrong, the server finds the task by its own type.
+  - confirm_delete (boolean, optional): set true only after the user agreed to permanently delete a finished task
 
 Returns:
-  {
-    "success": true,
-    "message": "Task canceled successfully",
-    "task_id": "abc-123",
-    "previous_status": "IN_PROGRESS"
-  }
-
-Use Cases:
-  - Cancel tasks that are taking too long
-  - Free up task slots when at limit
-  - Stop incorrect generations
+  { "success": true, "task_id": "abc-123", "task_type": "image-to-3d", "previous_status": "PENDING", "message": "..." }
 
 Examples:
-  - Cancel task: { task_id: "abc-123" }
-
-Error Handling:
-  - Returns error if task is already completed
-  - Returns "NotFound" if task doesn't exist`,
+  - Cancel a queued task: { task_id: "abc-123" }
+  - Delete a finished model the user no longer wants: { task_id: "abc-123", confirm_delete: true }`,
       inputSchema: CancelTaskInputSchema,
       annotations: {
         readOnlyHint: false,
         destructiveHint: true,
-        idempotentHint: true,
+        idempotentHint: false,
         openWorldHint: true
       }
     },
     async (params: z.infer<typeof CancelTaskInputSchema>) => {
       try {
-        const { task, endpoint } = await getTaskWithAutoInference(client, params.task_id, params.task_type);
+        const { task, endpoint, taskType } = await getTaskWithAutoInference(client, params.task_id, params.task_type);
         const previousStatus = task.status;
+        const creativeLab = taskType.startsWith("creative-lab-");
+        const finished = previousStatus === TaskStatus.SUCCEEDED ||
+          previousStatus === TaskStatus.FAILED ||
+          previousStatus === TaskStatus.CANCELED;
 
-        // Cancel the task
+        if (finished && creativeLab) {
+          return {
+            isError: true,
+            content: [{ type: "text", text: `Error: this Creative Lab task is already ${previousStatus} and cannot be canceled.` }]
+          };
+        }
+        if (finished && !params.confirm_delete) {
+          return {
+            isError: true,
+            content: [{
+              type: "text",
+              text: `This task is already ${previousStatus}. Deleting it permanently removes the task and its files, with no refund. ` +
+                "Nothing was changed. If the user wants that, call again with confirm_delete: true."
+            }]
+          };
+        }
+
         await client.delete(`${endpoint}/${params.task_id}`);
+
+        const message = creativeLab
+          ? previousStatus === TaskStatus.PENDING
+            ? "Canceled; the credits were refunded."
+            : "Canceled; credits for a task that had already started are not refunded."
+          : finished
+            ? "Deleted permanently, with its files (no refund)."
+            : "Deleted before it started; the credits were refunded.";
 
         const output = {
           success: true,
-          message: "Task canceled successfully",
+          message,
           task_id: params.task_id,
+          task_type: taskType,
           previous_status: previousStatus
         };
 
-        const textContent = `# Task Canceled
-
-**Task ID**: ${params.task_id}
-**Previous Status**: ${previousStatus}
-
-The task has been canceled successfully.`;
-
         return {
-          content: [{ type: "text", text: textContent }],
+          content: [{
+            type: "text",
+            text: `# Task ${creativeLab ? "Canceled" : "Deleted"}\n\n**Task ID**: ${params.task_id}\n**Previous Status**: ${previousStatus}\n\n${message}`
+          }],
           structuredContent: output
         };
       } catch (error) {
@@ -1008,7 +1047,7 @@ Error Handling:
             local_paths: savedPaths,
             project_dir: projectDir,
             count: savedPaths.length,
-            expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+            expires_at: expiresAt(task)
           };
           const textContent = `# Image(s) Downloaded
 
@@ -1016,7 +1055,7 @@ Error Handling:
 **Saved ${savedPaths.length} image(s)**:
 ${savedPaths.map(p => `- ${p}`).join("\n")}${projectDir ? `\n**Project Folder**: ${projectDir}` : ""}
 
-**Note**: Source URLs expire after 24 hours; the local files are permanent.`;
+${expiryNote(task)}`;
           return {
             content: [{ type: "text", text: textContent }],
             structuredContent: output
@@ -1059,9 +1098,9 @@ ${savedPaths.map(p => `- ${p}`).join("\n")}${projectDir ? `\n**Project Folder**:
 **Local File**: ${target}
 **Format**: ${ext.slice(1).toUpperCase()}${projectDir ? `\n**Project Folder**: ${projectDir}` : ""}
 
-**Note**: Source URL expires after 24 hours. The local file is permanent.`
+${expiryNote(task)}`
             }],
-            structuredContent: { download_url: motionUrl, local_path: target, project_dir: projectDir, file_size_bytes: size, format: ext.slice(1), expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() }
+            structuredContent: { download_url: motionUrl, local_path: target, project_dir: projectDir, file_size_bytes: size, format: ext.slice(1), expires_at: expiresAt(task) }
           };
         }
 
@@ -1114,7 +1153,7 @@ ${savedPaths.map(p => `- ${p}`).join("\n")}${projectDir ? `\n**Project Folder**:
               local_paths: clPaths,
               project_dir: clProjectDir,
               count: clPaths.length,
-              expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+              expires_at: expiresAt(task)
             };
             const textContent = `# Creative Lab Product Downloaded
 
@@ -1122,7 +1161,7 @@ ${savedPaths.map(p => `- ${p}`).join("\n")}${projectDir ? `\n**Project Folder**:
 **Saved ${clPaths.length} file(s)**:
 ${clPaths.map(p => `- ${p}`).join("\n")}${clProjectDir ? `\n**Project Folder**: ${clProjectDir}` : ""}
 
-**Note**: Source URLs expire after 24 hours; the local files are permanent.`;
+${expiryNote(task)}`;
             return {
               content: [{ type: "text", text: textContent }],
               structuredContent: output
@@ -1179,7 +1218,7 @@ This task did not generate a 3MF file. 3MF is **not** included by default — it
             lines.push("");
           }
 
-          lines.push("**Note**: Download URLs expire after 24 hours.");
+          lines.push(expiryNote(task));
 
           const output = {
             download_url: fmt === "fbx"
@@ -1189,7 +1228,7 @@ This task did not generate a 3MF file. 3MF is **not** included by default — it
             rigged_character_glb_url: task.result.rigged_character_glb_url,
             rigged_character_fbx_url: task.result.rigged_character_fbx_url,
             basic_animations: task.result.basic_animations,
-            expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+            expires_at: expiresAt(task)
           };
 
           return {
@@ -1209,7 +1248,7 @@ This task did not generate a 3MF file. 3MF is **not** included by default — it
           if (task.result.processed_armature_fbx_url) lines.push(`- **Armature FBX**: ${task.result.processed_armature_fbx_url}`);
           if (task.result.processed_animation_fps_fbx_url) lines.push(`- **FPS-converted FBX**: ${task.result.processed_animation_fps_fbx_url}`);
           lines.push("");
-          lines.push("**Note**: Download URLs expire after 24 hours.");
+          lines.push(expiryNote(task));
 
           const output = {
             download_url: fmt === "fbx"
@@ -1221,7 +1260,7 @@ This task did not generate a 3MF file. 3MF is **not** included by default — it
             animation_glb_url: task.result.animation_glb_url,
             animation_fbx_url: task.result.animation_fbx_url,
             processed_usdz_url: task.result.processed_usdz_url,
-            expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+            expires_at: expiresAt(task)
           };
 
           return {
@@ -1353,7 +1392,7 @@ This task did not generate a 3MF file. 3MF is **not** included by default — it
             texture_paths: savedTextures.length > 0 ? savedTextures : undefined,
             vertex_count: task.vertex_count,
             face_count: task.face_count,
-            expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+            expires_at: expiresAt(task)
           };
 
           let textContent = `# Model Downloaded
@@ -1375,7 +1414,7 @@ This task did not generate a 3MF file. 3MF is **not** included by default — it
             textContent += `\n\n## Saved Textures\n${savedTextures.map(t => `- ${t}`).join("\n")}`;
           }
 
-          textContent += `\n\n**Note**: Source URL expires after 24 hours. The local file is permanent.`;
+          textContent += `\n\n${expiryNote(task)}`;
 
           return {
             content: [{ type: "text", text: textContent }],
@@ -1391,7 +1430,7 @@ This task did not generate a 3MF file. 3MF is **not** included by default — it
             texture_urls: textureUrls,
             vertex_count: task.vertex_count,
             face_count: task.face_count,
-            expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+            expires_at: expiresAt(task)
           };
 
           return {
@@ -1404,7 +1443,7 @@ This task did not generate a 3MF file. 3MF is **not** included by default — it
 **Download URL** (use manually):
 ${downloadUrl}
 
-**Note**: Download URLs expire after 24 hours.`
+${expiryNote(task)}`
             }],
             structuredContent: output
           };

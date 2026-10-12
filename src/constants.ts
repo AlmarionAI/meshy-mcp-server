@@ -61,7 +61,8 @@ export enum AIModel {
 
 // Smart Topology models — selected via model_type: "smart-topology" on
 // image-to-3d or text preview (T2 only). meshy-t2 adds native part separation with a
-// configurable target_polycount; meshy-t1 is the previous generation.
+// configurable target_polycount. meshy-t1 is the deprecated previous generation:
+// still accepted on single-image generation, no longer advertised.
 export enum SmartTopologyModel {
   MESHY_T1 = "meshy-t1",
   MESHY_T2 = "meshy-t2"
@@ -161,17 +162,7 @@ export enum CreativeLabProduct {
 // Keycap base model — the only value the build stage accepts today (Cherry MX 1u).
 export const KEYCAP_BASE_MODEL = "cherry-mx-1x1-r1";
 
-// Remesh Output Formats
-export enum RemeshFormat {
-  GLB = "glb",
-  FBX = "fbx",
-  OBJ = "obj",
-  USDZ = "usdz",
-  BLEND = "blend",
-  STL = "stl"
-}
-
-// Convert Output Formats (Convert API additionally supports 3mf vs Remesh)
+// Convert Output Formats
 export enum ConvertFormat {
   GLB = "glb",
   FBX = "fbx",

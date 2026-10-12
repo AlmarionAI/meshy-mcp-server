@@ -5,8 +5,9 @@ import { registerPostProcessingTools } from "../dist/tools/postprocessing.js";
 import { registerImageTools } from "../dist/tools/image.js";
 import { registerBalanceTool } from "../dist/tools/balance.js";
 import { registerCreativeLabTools } from "../dist/tools/creative-lab.js";
+import { registerTaskTools } from "../dist/tools/tasks.js";
 
-// Offline request checks for the endpoints and options added in 0.7.0.
+// Offline request checks for the endpoints and options added or changed in 0.7.0.
 // The fake client answers every GET with a finished task of the type the path
 // implies, so tools that wait (Creative Lab) run to completion instantly.
 
@@ -14,6 +15,7 @@ function createHarness(register, getResponses = {}) {
   const tools = new Map();
   const posts = [];
   const gets = [];
+  const deletes = [];
   let next = 0;
   const client = {
     async post(path, body) {
@@ -30,6 +32,10 @@ function createHarness(register, getResponses = {}) {
     async getWithRetryAfter(path) {
       return { data: await this.get(path) };
     },
+    async delete(path) {
+      deletes.push(path);
+      return {};
+    },
   };
   register(
     {
@@ -44,6 +50,7 @@ function createHarness(register, getResponses = {}) {
   return {
     posts,
     gets,
+    deletes,
     schema: (name) => tools.get(name).schema,
     async run(name, input) {
       const { schema, handler } = tools.get(name);
@@ -220,4 +227,39 @@ test("creative lab: fidget pixel needs a subject; collapsible fidget is one task
   assert.notEqual(result.isError, true, JSON.stringify(result));
   assert.deepEqual(single.posts, [{ path: "/openapi/creative-lab/fidget-collapsible/v1", body: { image_url: "https://example.invalid/a.png", name: "ring" } }]);
   assert.equal(result.structuredContent.task_type, "creative-lab-fidget-collapsible");
+});
+
+test("cancel deletes a finished task only after confirmation and explains refunds", async () => {
+  const task = (status, type) => () => ({ id: "t", type, status });
+  const done = createHarness(registerTaskTools, { "/openapi/v1/image-to-3d/t": task("SUCCEEDED", "image-to-3d") });
+  const refused = await done.run("meshy_cancel_task", { task_id: "t" });
+  assert.equal(refused.isError, true);
+  assert.match(refused.content[0].text, /confirm_delete/);
+  assert.deepEqual(done.deletes, []);
+  const deleted = await done.run("meshy_cancel_task", { task_id: "t", confirm_delete: true });
+  assert.deepEqual(done.deletes, ["/openapi/v1/image-to-3d/t"]);
+  assert.match(deleted.structuredContent.message, /permanently/);
+
+  const pending = createHarness(registerTaskTools, { "/openapi/v1/image-to-3d/t": task("PENDING", "image-to-3d") });
+  assert.match((await pending.run("meshy_cancel_task", { task_id: "t" })).structuredContent.message, /refunded/);
+
+  const lab = createHarness(registerTaskTools, {
+    "/openapi/creative-lab/figure/v1/build/t": task("IN_PROGRESS", "creative-lab-figure-build"),
+  });
+  const canceled = await lab.run("meshy_cancel_task", { task_id: "t", task_type: "creative-lab-figure-build" });
+  assert.match(canceled.structuredContent.message, /not refunded/);
+  assert.deepEqual(lab.deletes, ["/openapi/creative-lab/figure/v1/build/t"]);
+});
+
+test("remesh sends only the fields the caller set", async () => {
+  const h = createHarness(registerPostProcessingTools);
+  const { body } = await h.call("meshy_remesh", { input_task_id: "t", target_polycount: 10000, alpha_thumbnail: true });
+  assert.deepEqual(body, { input_task_id: "t", target_formats: ["glb"], target_polycount: 10000, alpha_thumbnail: true });
+});
+
+test("retexture on meshy-6-lite suggests models retexture accepts", async () => {
+  const h = createHarness(registerPostProcessingTools);
+  const text = await h.invalid("meshy_retexture", { input_task_id: "t", text_style_prompt: "gold", ai_model: "meshy-6-lite", texture_resolution: "4k" });
+  assert.match(text, /meshy-6, meshy-7 or latest/);
+  assert.doesNotMatch(text, /7\.1/);
 });

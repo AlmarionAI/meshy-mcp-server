@@ -23,7 +23,7 @@ export function resolveGenerationOptions(options: GenerationOptions, endpoint: G
   const smartTopology = modelType === ModelType.SMART_TOPOLOGY;
 
   if (smartTopology && model !== SmartTopologyModel.MESHY_T1 && model !== SmartTopologyModel.MESHY_T2) {
-    throw new RequestValidationError("Smart Topology requires ai_model meshy-t2 (or legacy meshy-t1 on single-image generation).");
+    throw new RequestValidationError("Smart Topology requires ai_model meshy-t2.");
   }
   if (isSmartModel && !smartTopology) {
     throw new RequestValidationError("Smart Topology models require model_type smart-topology.");
@@ -80,10 +80,18 @@ export const isLiteModel = (model?: string) => model === AIModel.MESHY_6_LITE;
 /** image_enhancement is honored on meshy-6, meshy-7.1 and latest. */
 export const supportsImageEnhancement = (model?: string) => model === AIModel.MESHY_6 || isMeshy71(model);
 
-/** Rejects 4K/8K textures on the lite model instead of letting the API 400. */
-export function checkTextureResolution(model: string | undefined, textureResolution?: string, hdTexture?: boolean) {
+/**
+ * Rejects 4K/8K textures on the lite model instead of letting the API 400.
+ * `alternatives` names the models that endpoint takes for 4k/8k.
+ */
+export function checkTextureResolution(
+  model: string | undefined,
+  textureResolution?: string,
+  hdTexture?: boolean,
+  alternatives = "meshy-6, meshy-7.1 or latest"
+) {
   if (isLiteModel(model) && ((textureResolution !== undefined && textureResolution !== "2k") || hdTexture)) {
-    throw new RequestValidationError(`${model} supports 2k textures only. Use meshy-6, meshy-7.1 or latest for 4k/8k.`);
+    throw new RequestValidationError(`${model} supports 2k textures only. Use ${alternatives} for 4k/8k.`);
   }
 }
 

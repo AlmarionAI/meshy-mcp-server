@@ -37,11 +37,11 @@ export class MeshyAuthError extends Error {
 export const MISSING_API_KEY_MESSAGE =
   "MESHY_API_KEY environment variable is required. Put it in the \"env\" block of your " +
   "MCP client config (not in \"args\"), then restart the Meshy MCP server. " +
-  "Get your API key from https://www.meshy.ai/settings/api";
+  "Get your API key from https://www.meshy.ai/developers/keys";
 
 export const INVALID_API_KEY_MESSAGE =
   "Authentication failed: the Meshy API rejected MESHY_API_KEY (401). The key is mistyped, " +
-  "revoked or expired. Create a new key at https://www.meshy.ai/settings/api, update the " +
+  "revoked or expired. Create a new key at https://www.meshy.ai/developers/keys, update the " +
   "MCP client config, then restart the Meshy MCP server.";
 
 /**

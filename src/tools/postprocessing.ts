@@ -25,9 +25,9 @@ import {
 import { formatTaskCreatedResponse } from "../utils/response-formatter.js";
 import { checkTextureResolution } from "../utils/generation-options.js";
 import { getTaskWithAutoInference } from "../services/meshy-client.js";
+import { buildApiRequest } from "../utils/request-builder.js";
 import {
   CreateTaskApiResponse,
-  RemeshApiRequest,
   RetextureApiRequest,
   RigApiRequest,
   AnimateApiRequest,
@@ -42,21 +42,21 @@ export function registerPostProcessingTools(server: McpServer, client: MeshyClie
   server.registerTool(
     "meshy_remesh",
     {
-      title: "Remesh or Convert 3D Model",
-      description: `Remesh an existing 3D model or convert it to different formats using Meshy AI.
+      title: "Remesh 3D Model",
+      description: `Remesh an existing 3D model: change its polygon count or topology. Cost: 5 credits.
 
-Use this to optimize polygon count, change topology, convert formats, or reposition model origin.
+For a format change only use meshy_convert (1 credit); to scale a model use meshy_resize (1 credit). The resize / origin / convert_format_only fields here are deprecated in favor of those tools.
 
 Args:
-  - input_task_id (string, optional): Task ID of an existing completed task to remesh
-  - model_url (string, optional): Direct URL to a model file to remesh
+  - input_task_id (string, optional): SUCCEEDED text-to-3d (preview or refine), image-to-3d or retexture task
+  - model_url (string, optional): Public URL or data URI of a .glb / .gltf / .obj / .fbx / .stl model
     (Provide either input_task_id or model_url)
-  - target_formats (array, optional): Output formats to generate (default: ["glb"]). Options: "glb", "fbx", "obj", "usdz", "blend", "stl"
-  - topology (enum, optional): Mesh topology - "quad" or "triangle"
-  - target_polycount (number, optional): Target polygon count (100–300,000)
-  - resize_height (number, optional): Resize model height in meters (0 = no resize, default: 0)
-  - origin_at (enum, optional): Model origin placement - "bottom" or "center"
-  - convert_format_only (boolean, optional): Only convert format without remeshing (default: false)
+  - target_formats (array, optional): Output formats (default: ["glb"]). Options: "glb", "fbx", "obj", "usdz", "blend", "stl", "3mf"
+  - topology (enum, optional): Mesh topology - "quad" or "triangle" (default)
+  - target_polycount (number, optional): Target polygon count (100–300,000, default 30,000)
+  - decimation_mode (number, optional): Adaptive decimation level 1–4 (1 = ultra … 4 = low); overrides target_polycount
+  - alpha_thumbnail (boolean, optional): Also render a transparent-background preview
+  - resize_height / resize_longest_side / auto_size / origin_at / convert_format_only: deprecated, see above
   - response_format (enum): Output format - "markdown" or "json" (default: "markdown")
 
 Returns:
@@ -72,7 +72,7 @@ Next Steps:
 
 Examples:
   - Remesh by task: { input_task_id: "abc-123", target_polycount: 10000 }
-  - Convert format: { model_url: "https://...", target_formats: ["fbx", "obj"], convert_format_only: true }
+  - Quad mesh for a game engine: { input_task_id: "abc-123", topology: "quad", target_formats: ["fbx"] }
 
 Error Handling:
   - Returns "NotFound" if input_task_id doesn't exist
@@ -98,22 +98,9 @@ Error Handling:
           };
         }
 
-        const request: RemeshApiRequest = {
-          target_formats: params.target_formats,
-          resize_height: params.resize_height,
-          convert_format_only: params.convert_format_only
-        };
-
-        if (params.input_task_id) request.input_task_id = params.input_task_id;
-        if (params.model_url) request.model_url = params.model_url;
-        if (params.topology) request.topology = params.topology;
-        if (params.target_polycount) request.target_polycount = params.target_polycount;
-        if (params.origin_at) request.origin_at = params.origin_at;
-        if (params.resize_longest_side !== undefined) request.resize_longest_side = params.resize_longest_side;
-        if (params.decimation_mode !== undefined) request.decimation_mode = params.decimation_mode;
-        if (params.auto_size !== undefined) request.auto_size = params.auto_size;
-
-        const response = await client.post<CreateTaskApiResponse>("/openapi/v1/remesh", request as unknown as Record<string, unknown>);
+        // Only fields the caller set; the deprecated resize / convert fields
+        // are no longer sent with placeholder values.
+        const response = await client.post<CreateTaskApiResponse>("/openapi/v1/remesh", buildApiRequest({}, params));
         const taskId = response.result;
 
         const output = {
@@ -256,7 +243,7 @@ Error Handling:
             };
           }
         }
-        checkTextureResolution(aiModel, params.texture_resolution, params.hd_texture);
+        checkTextureResolution(aiModel, params.texture_resolution, params.hd_texture, "meshy-6, meshy-7 or latest");
 
         const request: RetextureApiRequest = {
           enable_pbr: params.enable_pbr

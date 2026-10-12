@@ -48,7 +48,10 @@ export const ListTasksInputSchema = z.object({
  */
 export const CancelTaskInputSchema = z.object({
   task_id: TaskIdSchema,
-  task_type: TaskTypeSchema
+  task_type: TaskTypeSchema,
+  confirm_delete: z.boolean()
+    .optional()
+    .describe("Required (true) to permanently delete a task that already finished. Ask the user first.")
 }).strict();
 
 /**

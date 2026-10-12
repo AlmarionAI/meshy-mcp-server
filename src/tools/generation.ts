@@ -48,7 +48,7 @@ Args:
   - ultra_mode: deprecated compatibility alias for geometry_resolution "2k"
   - topology (enum, optional): Mesh topology - "quad" or "triangle"
   - target_polycount (number, optional): Target polygon count (100–300,000)
-  - symmetry_mode (enum, optional): "off", "auto" (default), or "on"
+  - symmetry_mode (enum, optional): DEPRECATED — no longer affects output
   - should_remesh (boolean, optional): Standard remeshing, default false for Meshy 6/7/7.1. Ignored on Smart Topology
   - pose_mode (enum, optional): "a-pose" or "t-pose". IMPORTANT: Use "t-pose" when the user intends to rig or animate the model
   - target_formats (string[], optional): Output formats. Default: all except 3mf. For 3D printing white model, pass ["obj"].
@@ -168,11 +168,11 @@ IMAGE INPUT (provide ONE, NEVER both):
   - NEVER manually base64-encode. NEVER use both file_path and image_url.
 
 Other Args:
-  - ai_model: "latest" (default, = Meshy 7.1) / "meshy-7.1" / "meshy-6" (20 mesh, 30 textured), "meshy-6-lite" (5 / 15, 2K textures only) for standard; "meshy-t2" (5 / 15) for Smart Topology. "meshy-7" is deprecated; legacy "meshy-t1" still accepted. Ask the user which model and confirm the cost first
+  - ai_model: "latest" (default, = Meshy 7.1) / "meshy-7.1" / "meshy-6" (20 mesh, 30 textured), "meshy-6-lite" (5 / 15, 2K textures only) for standard; "meshy-t2" (5 / 15) for Smart Topology. "meshy-7" is deprecated. Ask the user which model and confirm the cost first
   - geometry_resolution: "standard" (default), "2k" or "4k" Ultra pass (+5 credits) on Meshy 7.1/latest standard generation. Confirm the surcharge first
   - ultra_mode: deprecated compatibility alias for the 2k pass. Legacy explicit Meshy 7 single-image Ultra is retained
   - model_type: "standard" (default), "smart-topology", or "lowpoly" (deprecated)
-  - pose_mode, topology, target_polycount, should_remesh, symmetry_mode
+  - pose_mode, topology, target_polycount, should_remesh (symmetry_mode is deprecated and has no effect)
   - should_texture: Whether to generate textures (default true). Set false for untextured mesh
   - enable_pbr: PBR maps (default false). Set true for metallic/roughness/normal maps
   - texture_prompt, texture_image_url: Guide texturing
@@ -444,7 +444,7 @@ Other Args:
   - ai_model: "latest" (default, = Meshy 7.1) / "meshy-7.1" / "meshy-6" (20 mesh, 30 textured), "meshy-6-lite" (5 / 15, 2K textures only). "meshy-7" is deprecated. Smart Topology is unavailable here. Ask the user which model and confirm the cost first
   - geometry_resolution: "standard" (default) or "2k" Ultra pass (+5 credits) on Meshy 7.1/latest. No 4k here
   - ultra_mode: deprecated compatibility alias for the 2k pass; confirm higher-detail cost
-  - pose_mode, topology, target_polycount, should_remesh, symmetry_mode (there is no model_type here)
+  - pose_mode, topology, target_polycount, should_remesh (there is no model_type here; symmetry_mode is deprecated and has no effect)
   - should_texture: Whether to generate textures (default true)
   - enable_pbr: PBR maps (default false)
   - texture_prompt, texture_image_url: Guide texturing

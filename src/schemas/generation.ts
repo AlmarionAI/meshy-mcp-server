@@ -36,7 +36,7 @@ const hdTexture = () =>
     .describe("DEPRECATED — use texture_resolution instead (hd_texture: true is exactly texture_resolution: '4k'). Kept for backward compatibility.");
 const textureResolution = () =>
   z.nativeEnum(TextureResolution).optional()
-    .describe("Base color texture resolution: 2k (default), 4k, or 8k. 4k/8k need meshy-6 / meshy-7.1 / latest / meshy-t2 (meshy-6-lite is 2k only). 8k adds 5 credits to the texture stage (15 instead of 10). PBR maps stay at 2K. Replaces hd_texture.");
+    .describe("Base color texture resolution: 2k (default), 4k, or 8k. 4k/8k need meshy-6 / meshy-7.1 / latest / meshy-t2 (meshy-6-lite is 2k only). 8k adds 5 credits to the texture stage (15 instead of 10); at 8k the PBR maps are 4K and there is no emission map. Replaces hd_texture.");
 const multiViewThumbnails = () =>
   z.boolean().optional()
     .describe("Also return 4 cardinal-view thumbnails (front/back/left/right). Default false.");
@@ -120,18 +120,18 @@ export const ImageTo3DInputSchema = z.object({
     .describe("PUBLIC image URL (https://...). Use ONLY for remote images. For local files use file_path instead. NEVER manually base64-encode."),
   file_path: z.string()
     .optional()
-    .describe("ABSOLUTE path to LOCAL image (.jpg/.png). PREFERRED for local files. Server auto-encodes. Example: /Users/me/photo.jpg. NEVER manually base64-encode."),
+    .describe("ABSOLUTE path to LOCAL image (.jpg/.jpeg/.png/.webp). PREFERRED for local files. Server auto-encodes. Example: /Users/me/photo.jpg. NEVER manually base64-encode."),
   input_task_id: z.string()
     .optional()
     .describe("Chain from a SUCCEEDED text-to-image or image-to-image task: use its generated image as the input instead of image_url/file_path. Provide only one image source."),
   ai_model: z.union([z.nativeEnum(AIModel), z.nativeEnum(SmartTopologyModel)])
     .optional()
-    .describe("Standard (model_type standard): 'latest' (default, = Meshy 7.1) or 'meshy-7.1' = best quality; 'meshy-6'; 'meshy-6-lite' = fast and cheap, 2K textures only. 'meshy-7' is deprecated (use meshy-7.1). Smart Topology (model_type smart-topology): 'meshy-t2' (default) = clean part-separated mesh at a set face count; legacy 'meshy-t1' still accepted. Credits: meshy-7.1/latest/meshy-6 20 mesh-only, 30 textured (35 at 8K); meshy-6-lite 5 / 15; meshy-t2 5 / 15 (20 at 8K). IMPORTANT: ask the user which model to use and confirm the cost first."),
+    .describe("Standard (model_type standard): 'latest' (default, = Meshy 7.1) or 'meshy-7.1' = best quality; 'meshy-6'; 'meshy-6-lite' = fast and cheap, 2K textures only. 'meshy-7' is deprecated (use meshy-7.1). Smart Topology (model_type smart-topology): 'meshy-t2' (default) = clean part-separated mesh at a set face count. Credits: meshy-7.1/latest/meshy-6 20 mesh-only, 30 textured (35 at 8K); meshy-6-lite 5 / 15; meshy-t2 5 / 15 (20 at 8K). IMPORTANT: ask the user which model to use and confirm the cost first."),
   geometry_resolution: geometryResolution(),
   ultra_mode: deprecatedUltraMode(),
   model_type: z.nativeEnum(ModelType)
     .optional()
-    .describe("Model type: 'standard' (default), 'smart-topology' (part-separated geometry via meshy-t1/meshy-t2), or deprecated 'lowpoly'. Prefer Smart Topology for controllable lower-poly generation; confirm current costs."),
+    .describe("Model type: 'standard' (default), 'smart-topology' (part-separated geometry via meshy-t2), or deprecated 'lowpoly'. Prefer Smart Topology for controllable lower-poly generation; confirm current costs."),
   pose_mode: z.nativeEnum(PoseMode)
     .optional()
     .describe("Pose mode for character models: 'a-pose' or 't-pose'. IMPORTANT: When the user intends to rig or animate the model, default to 't-pose' for best rigging results"),
@@ -224,7 +224,7 @@ export const MultiImageTo3DInputSchema = z.object({
     .min(1)
     .max(4)
     .optional()
-    .describe("Array of 1–4 absolute paths to local image files (.jpg, .jpeg, .png). The server reads and encodes them automatically"),
+    .describe("Array of 1–4 absolute paths to local image files (.jpg, .jpeg, .png, .webp). The server reads and encodes them automatically"),
   input_task_id: z.string()
     .optional()
     .describe("Chain from a SUCCEEDED text-to-image / image-to-image task that produced multi-view images, using them as the input instead of image_urls/file_paths."),

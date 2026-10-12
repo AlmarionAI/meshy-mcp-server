@@ -135,21 +135,6 @@ export interface MultiImageTo3DApiRequest {
   origin_at?: string;
 }
 
-// Remesh API request body
-export interface RemeshApiRequest {
-  target_formats: string[];
-  resize_height: number;
-  convert_format_only: boolean;
-  input_task_id?: string;
-  model_url?: string;
-  topology?: string;
-  target_polycount?: number;
-  origin_at?: string;
-  decimation_mode?: number;
-  resize_longest_side?: number;
-  auto_size?: boolean;
-}
-
 // Retexture API request body
 export interface RetextureApiRequest {
   enable_original_uv?: boolean;

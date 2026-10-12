@@ -191,7 +191,7 @@ ${launchCmd}
 **Reminders**:
 - Execute the launch command above to open the model in the slicer
 - Check print settings (layer height, infill, supports) in the slicer before printing
-- The model URL is temporary and will expire after 24 hours`;
+- A Meshy download URL stops working at its task's expires_at (3 days after the task finishes); download the file first`;
           }
         } else {
           textContent = JSON.stringify(output, null, 2);
