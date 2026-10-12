@@ -3,7 +3,32 @@
  */
 
 import { z } from "zod";
+import { PRINTER_BRANDS } from "../constants.js";
 import { ResponseFormatSchema, TaskIdSchema, UrlSchema } from "./common.js";
+
+/**
+ * Optional wall-thickness check, shared by analyze and repair. Send
+ * printer_type, one print size, or both.
+ */
+const printSizeFields = {
+  printer_type: z.enum(["fdm", "sla", "full_color"])
+    .optional()
+    .describe("Printer you plan to use; sets the minimum wall for the wall-thickness check: fdm 1.0 mm, sla 0.8 mm, full_color 2.0 mm. Defaults to fdm when only a print size is sent."),
+  intended_print_height_mm: z.number()
+    .min(1).max(1000)
+    .optional()
+    .describe("Print height in mm (1–1000). GLB input only (any input_task_id counts as GLB). Send at most one print size."),
+  intended_print_longest_side_mm: z.number()
+    .min(1).max(1000)
+    .optional()
+    .describe("Length of the print's longest side in mm (1–1000). Works with every input format. Send at most one print size.")
+};
+
+export function checkPrintSize(params: { intended_print_height_mm?: number; intended_print_longest_side_mm?: number }): string | null {
+  return params.intended_print_height_mm !== undefined && params.intended_print_longest_side_mm !== undefined
+    ? "Error: send at most one of intended_print_height_mm and intended_print_longest_side_mm."
+    : null;
+}
 
 /**
  * Send to slicer input schema (cross-platform 7-slicer detection).
@@ -37,15 +62,15 @@ export const SendToSlicerInputSchema = z.object({
  *
  * Provide input_task_id or model_url; input_task_id wins when both are given.
  *
- * input_task_id constraints: must be a SUCCEEDED task that used Meshy 6 or
- * newer (including Meshy 7 / 7.1). Supported task types: image-to-3d, multi-image-to-3d,
- * text-to-3d, remesh, retexture.
+ * input_task_id: a SUCCEEDED image-to-3d, multi-image-to-3d, text-to-3d, remesh
+ * or retexture task on Meshy 6 or newer, or a print-repair task.
  */
 export const AnalyzePrintabilityInputSchema = z.object({
   input_task_id: TaskIdSchema.optional()
-    .describe("ID of a SUCCEEDED upstream task to analyze (must use Meshy 6 or newer, including Meshy 7 / 7.1). Takes priority over model_url when both are given."),
+    .describe("ID of a SUCCEEDED task to analyze: text-to-3d, image-to-3d, multi-image-to-3d, remesh or retexture on Meshy 6 or newer (Meshy 7 / 7.1 included), or a print-repair task. Takes priority over model_url when both are given."),
   model_url: UrlSchema.optional()
     .describe("Public URL of a 3D model to analyze (.glb / .gltf / .obj / .fbx / .stl, max 100 MB). Ignored when input_task_id is given."),
+  ...printSizeFields,
   response_format: ResponseFormatSchema
 }).strict();
 
@@ -55,9 +80,13 @@ export const AnalyzePrintabilityInputSchema = z.object({
  */
 export const RepairPrintabilityInputSchema = z.object({
   input_task_id: TaskIdSchema.optional()
-    .describe("ID of a SUCCEEDED upstream task with a GLB asset. Output will be GLB. Takes priority over model_url when both are given."),
+    .describe("ID of a SUCCEEDED task with a GLB: text-to-3d, image-to-3d, multi-image-to-3d, remesh, retexture, or a print-analyze task (an analyze task that checked wall thickness passes on its printer and size). Output will be GLB. Takes priority over model_url when both are given."),
   model_url: UrlSchema.optional()
     .describe("Public URL of a 3D model to repair (.glb / .stl / .obj / .fbx / .gltf, max 100 MB). Output matches the input format (.glb/.stl/.obj/.fbx/.gltf). .fbx must be an https URL — it cannot be passed as a data: URI. Ignored when input_task_id is given."),
+  ...printSizeFields,
+  alpha_thumbnail: z.boolean()
+    .optional()
+    .describe("Also render a transparent-background (RGBA) preview, returned as alpha_thumbnail_url. Default false."),
   response_format: ResponseFormatSchema
 }).strict();
 
@@ -81,7 +110,50 @@ export const ProcessMulticolorInputSchema = z.object({
     .min(3, "Minimum depth 3")
     .max(6, "Maximum depth 6")
     .default(4)
-    .describe("Quadtree depth for color precision (3-6, default: 4). Higher = finer color boundaries but larger file."),
+    .describe("Quadtree depth for color precision (3-6, default: 4). Higher = finer color boundaries but larger file. realistic style only."),
+  style: z.enum(["realistic", "cartoon"])
+    .optional()
+    .describe("Color style: 'realistic' (API default; samples the texture for photo-like detail, larger file, needs one base color texture with UVs on every part) or 'cartoon' (flat uniform color regions, smaller file, also accepts vertex colors)."),
+  printer_brand: z.enum(PRINTER_BRANDS)
+    .optional()
+    .describe("Printer brand whose slicer preset (default printer, 0.4 mm nozzle) is written into the 3MF: bambu (API default), anycubic, creality, elegoo, flashforge, prusa, qidi, snapmaker, ankermake."),
+  response_format: ResponseFormatSchema
+}).strict();
+
+/**
+ * Auto Split input schema — POST /openapi/v1/print/split (10 credits).
+ */
+export const AutoSplitInputSchema = z.object({
+  input_task_id: TaskIdSchema
+    .describe("ID of a SUCCEEDED image-to-3d, multi-image-to-3d, text-to-3d preview, remesh, convert or resize task whose model was made with meshy-6, meshy-7, meshy-7.1 or latest. Low-poly and Smart Topology (meshy-t2) models are not supported. A textured model is accepted; its texture is not carried into the result."),
+  mode: z.enum(["auto", "by_parts", "by_color"])
+    .optional()
+    .describe("How to cut: 'auto' (API default; Meshy picks the cuts), 'by_parts' (the structural parts named in prompt), or 'by_color' (the color regions named in prompt; only for image-to-3d / multi-image-to-3d inputs)."),
+  prompt: z.string()
+    .min(1)
+    .max(600)
+    .optional()
+    .describe("Required for by_parts / by_color: name 1–10 parts, e.g. 'head, torso, left arm, right arm, legs' or 'the figure and the base'. Anything not named becomes one remaining part. Max 600 characters. Ignored in auto mode."),
+  target_formats: z.array(z.enum(["glb", "obj", "fbx", "stl", "usdz", "blend", "3mf"]))
+    .optional()
+    .describe("Extra export formats (glb is always produced). glb/obj/fbx/usdz/blend/3mf keep each part as its own object; stl fuses the parts into one solid. Use 3mf for separately selectable parts in a slicer."),
+  layout: z.enum(["assembled", "on_plate"])
+    .optional()
+    .describe("'assembled' (API default; parts stay in place) or 'on_plate' (parts laid flat and spread out, ready to slice)."),
+  connectors: z.boolean()
+    .optional()
+    .describe("Add mortise-and-tenon connectors at each cut so the printed parts fit together. Default false."),
+  connector_type: z.enum(["cube", "cylinder"])
+    .optional()
+    .describe("Connector shape when connectors is true (API default cube)."),
+  connector_size: z.number()
+    .min(0.1).max(0.8)
+    .optional()
+    .describe("Connector size relative to the cut surface, 0.1–0.8 (API default 0.5)."),
+  connector_height: z.number()
+    .min(0.1).max(0.8)
+    .optional()
+    .describe("How far the connector extends from the cut surface, relative to it, 0.1–0.8 (API default 0.1)."),
   response_format: ResponseFormatSchema
 }).strict();
 

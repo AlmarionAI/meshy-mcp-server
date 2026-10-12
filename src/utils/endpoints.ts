@@ -20,6 +20,8 @@ const TASK_ENDPOINTS: Record<TaskType, string> = {
   [TaskType.MULTI_COLOR_PRINT]: "/openapi/v1/print/multi-color",
   [TaskType.PRINT_ANALYZE]: "/openapi/v1/print/analyze",
   [TaskType.PRINT_REPAIR]: "/openapi/v1/print/repair",
+  [TaskType.PRINT_SPLIT]: "/openapi/v1/print/split",
+  [TaskType.TEXT_TO_MOTION]: "/openapi/v1/text-to-motion",
   // Creative Lab — stage-specific bases. base+"/:id" = GET status, base alone = list, base = POST create.
   [TaskType.CREATIVE_LAB_FIGURE_PROTOTYPE]: "/openapi/creative-lab/figure/v1/prototype",
   [TaskType.CREATIVE_LAB_FIGURE_BUILD]: "/openapi/creative-lab/figure/v1/build",
@@ -34,7 +36,10 @@ const TASK_ENDPOINTS: Record<TaskType, string> = {
   [TaskType.CREATIVE_LAB_BRICK_FIGURE_PROTOTYPE]: "/openapi/creative-lab/brick-figure/v1/prototype",
   [TaskType.CREATIVE_LAB_BRICK_FIGURE_BUILD]: "/openapi/creative-lab/brick-figure/v1/build",
   [TaskType.CREATIVE_LAB_KEYCAP_PROTOTYPE]: "/openapi/creative-lab/keycap/v1/prototype",
-  [TaskType.CREATIVE_LAB_KEYCAP_BUILD]: "/openapi/creative-lab/keycap/v1/build"
+  [TaskType.CREATIVE_LAB_KEYCAP_BUILD]: "/openapi/creative-lab/keycap/v1/build",
+  [TaskType.CREATIVE_LAB_FIDGET_PIXEL_PROTOTYPE]: "/openapi/creative-lab/fidget-pixel/v1/prototype",
+  [TaskType.CREATIVE_LAB_FIDGET_PIXEL_BUILD]: "/openapi/creative-lab/fidget-pixel/v1/build",
+  [TaskType.CREATIVE_LAB_FIDGET_COLLAPSIBLE]: "/openapi/creative-lab/fidget-collapsible/v1"
 };
 
 /**
@@ -80,37 +85,9 @@ export function toTaskType(value: unknown): TaskType | undefined {
 }
 
 /**
- * Task types that have list endpoints (excludes rigging and animation which have no list API)
+ * Every task type has a list endpoint (GET on its base path).
  */
-export const LIST_CAPABLE_TASK_TYPES: TaskType[] = [
-  TaskType.TEXT_TO_3D,
-  TaskType.IMAGE_TO_3D,
-  TaskType.MULTI_IMAGE_TO_3D,
-  TaskType.REMESH,
-  TaskType.RETEXTURE,
-  TaskType.TEXT_TO_IMAGE,
-  TaskType.IMAGE_TO_IMAGE,
-  TaskType.CONVERT,
-  TaskType.RESIZE,
-  TaskType.UV_UNWRAP,
-  TaskType.MULTI_COLOR_PRINT,
-  TaskType.PRINT_ANALYZE,
-  TaskType.PRINT_REPAIR,
-  TaskType.CREATIVE_LAB_FIGURE_PROTOTYPE,
-  TaskType.CREATIVE_LAB_FIGURE_BUILD,
-  TaskType.CREATIVE_LAB_LAMP_PROTOTYPE,
-  TaskType.CREATIVE_LAB_LAMP_BUILD,
-  TaskType.CREATIVE_LAB_KEYCHAIN_PROTOTYPE,
-  TaskType.CREATIVE_LAB_KEYCHAIN_BUILD,
-  TaskType.CREATIVE_LAB_FRIDGE_MAGNET_PROTOTYPE,
-  TaskType.CREATIVE_LAB_FRIDGE_MAGNET_BUILD,
-  TaskType.CREATIVE_LAB_VINYL_FIGURE_PROTOTYPE,
-  TaskType.CREATIVE_LAB_VINYL_FIGURE_BUILD,
-  TaskType.CREATIVE_LAB_BRICK_FIGURE_PROTOTYPE,
-  TaskType.CREATIVE_LAB_BRICK_FIGURE_BUILD,
-  TaskType.CREATIVE_LAB_KEYCAP_PROTOTYPE,
-  TaskType.CREATIVE_LAB_KEYCAP_BUILD
-];
+export const LIST_CAPABLE_TASK_TYPES = Object.keys(TASK_ENDPOINTS) as TaskType[];
 
 /**
  * Map task type to its API endpoint base path

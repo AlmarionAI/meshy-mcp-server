@@ -61,7 +61,7 @@ async function initializeServer() {
     console.error("  ✓ Workspace tools registered (list models)");
 
     registerPostProcessingTools(server, meshyClient);
-    console.error("  ✓ Post-processing tools registered (remesh, retexture, rig, animate)");
+    console.error("  ✓ Post-processing tools registered (remesh, retexture, rig, animate, text-to-motion, animation library)");
 
     registerConversionTools(server, meshyClient);
     console.error("  ✓ Conversion tools registered (convert, resize, uv-unwrap)");
@@ -70,15 +70,15 @@ async function initializeServer() {
     console.error("  ✓ Image tools registered (text-to-image, image-to-image)");
 
     registerPrintingTools(server, meshyClient);
-    console.error("  ✓ Printing tools registered (send-to-slicer, analyze-printability, repair-printability, process-multicolor)");
+    console.error("  ✓ Printing tools registered (send-to-slicer, analyze-printability, repair-printability, process-multicolor, auto-split)");
 
     registerCreativeLabTools(server, meshyClient);
     console.error("  ✓ Creative Lab tool registered (end-to-end prototype→build)");
 
     registerBalanceTool(server, meshyClient);
-    console.error("  ✓ Balance tool registered (check-balance)");
+    console.error("  ✓ Account tools registered (check-balance, list-usage)");
 
-    console.error("✓ Server initialized successfully with 24 tools");
+    console.error("✓ Server initialized successfully with 28 tools");
     return meshyClient;
   } catch (error) {
     console.error("Failed to initialize server:", error);

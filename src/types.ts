@@ -191,23 +191,23 @@ export interface UvUnwrapApiRequest {
   model_url?: string;
 }
 
-// Creative Lab API request bodies (POST /openapi/creative-lab/<product>/v1/{prototype|build})
+// Creative Lab API request bodies (POST /openapi/creative-lab/<product>/v1/{prototype|build},
+// or /openapi/creative-lab/fidget-collapsible/v1 for the single-stage product)
 export interface CreativeLabPrototypeApiRequest {
-  image_url?: string;
-  image_subject?: string;
+  image_url: string;
   name?: string;
+  image_subject?: string; // lamp
+  type?: string;          // fidget-pixel: person | other
+  name_text?: string;     // keychain engraving
 }
 
 export interface CreativeLabBuildApiRequest {
   input_task_id: string;
   name?: string;
-  // Keycap only: the build stage picks one of the prototype's candidates and
-  // accepts an options object. Every other product ignores these.
+  // Keycap only: one of the prototype's candidate_ids
   candidate_id?: string;
-  options?: {
-    base_model?: string;
-    head_size_mm?: number;
-  };
+  options?: Record<string, string | number | boolean>;
+  output?: { format: string };
 }
 
 // Rig API request body
@@ -221,34 +221,14 @@ export interface RigApiRequest {
 // Animate API request body
 export interface AnimateApiRequest {
   rig_task_id: string;
-  action_id: number;
+  // Exactly one of action_id / action_ids / motion_task_id
+  action_id?: number;
+  action_ids?: number[];
+  motion_task_id?: string;
   post_process?: {
     operation_type: string;
     fps?: number;
   };
-}
-
-// Multi-Color Print API request body (POST /openapi/v1/print/multi-color)
-// Provide exactly one of input_task_id / model_url.
-export interface MultiColorPrintApiRequest {
-  input_task_id?: string;
-  model_url?: string;
-  max_colors?: number;
-  max_depth?: number;
-}
-
-// Analyze Printability API request body (POST /openapi/v1/print/analyze)
-// Provide exactly one of input_task_id / model_url.
-export interface AnalyzePrintabilityApiRequest {
-  input_task_id?: string;
-  model_url?: string;
-}
-
-// Repair Printability API request body (POST /openapi/v1/print/repair)
-// Provide exactly one of input_task_id / model_url.
-export interface RepairPrintabilityApiRequest {
-  input_task_id?: string;
-  model_url?: string;
 }
 
 // Printability evaluation result (returned by GET /openapi/v1/print/analyze/:id once SUCCEEDED)
@@ -265,6 +245,19 @@ export interface PrintabilityResult {
     degenerate_faces: number;
     holes: number;
   };
+  // Present only when wall thickness was checked (printer_type / print size sent)
+  intended_print?: {
+    printer_type: string;
+    height_mm: number | null;
+    longest_side_mm: number;
+    wall_thickness_mm: number;
+    dimensions_mm: [number, number, number] | null;
+  };
+  thin_walls?: {
+    thin_area_ratio: number | null;
+    has_thin_walls: boolean | null;
+    status: string;
+  };
   evaluated_at: number;
 }
 
@@ -275,14 +268,19 @@ export interface TextToImageApiRequest {
   generate_multi_view: boolean;
   aspect_ratio?: string;
   pose_mode?: string;
+  remove_background?: boolean;
 }
 
 // Image-to-Image API request body
 export interface ImageToImageApiRequest {
   ai_model: string;
   prompt: string;
-  reference_image_urls: string[];
+  // One of input_task_id / reference_image_urls (input_task_id wins)
+  input_task_id?: string;
+  reference_image_urls?: string[];
   generate_multi_view: boolean;
+  aspect_ratio?: string;
+  remove_background?: boolean;
 }
 
 // Task Model — matches the flat structure returned by Meshy API
@@ -308,7 +306,16 @@ export interface Task {
     blend?: string;
     stl?: string;
     "3mf"?: string;
+    // Creative Lab bundles: lamp parts and zip output
+    lamp_stl?: string;
+    base_stl?: string;
+    bundle_zip?: string;
   };
+  // Auto Split: number of parts, and whether an unreadable prompt fell back to auto
+  part_count?: number;
+  prompt_ignored?: boolean;
+  // When the result assets expire (ms since epoch; 0 until finished)
+  expires_at?: number;
 
   // Populated only on print-analyze tasks once SUCCEEDED
   printability?: PrintabilityResult;
@@ -350,6 +357,11 @@ export interface Task {
     processed_usdz_url?: string;
     processed_armature_fbx_url?: string;
     processed_animation_fps_fbx_url?: string;
+    // Text-to-motion tasks
+    motion_url?: string;
+    motion_format?: string;
+    duration_ms?: number;
+    mode?: string;
   };
 }
 
@@ -414,6 +426,34 @@ export interface PaginationParams {
 // Balance
 export interface BalanceResponse {
   balance: number;
+  /** Credits that expire at monthly_resets_at */
+  monthly_credits?: number;
+  /** Credits that never expire (credit packs, rewards) */
+  permanent_credits?: number;
+  /** Next monthly refresh, ms since epoch; null when none is scheduled */
+  monthly_resets_at?: number | null;
+}
+
+// One entry of GET /openapi/v1/animations/library
+export interface LibraryAnimation {
+  action_id: number;
+  name: string;
+  key: string;
+  category: string;
+  sub_category: string;
+  preview_url: string;
+}
+
+// One row of GET /openapi/v1/usage/tasks
+export interface UsageRecord {
+  task_id: string;
+  endpoint: string;
+  status: string;
+  created_at: number;
+  finished_at: number | null;
+  consumed_credits: number;
+  api_key_name?: string;
+  api_key_suffix?: string;
 }
 
 export interface PaginatedResponse<T> {

@@ -19,17 +19,16 @@ import {
   AnalyzePrintabilityInputSchema,
   RepairPrintabilityInputSchema,
   ProcessMulticolorInputSchema,
+  AutoSplitInputSchema,
   printSource,
+  checkPrintSize,
   MISSING_PRINT_SOURCE
 } from "../schemas/printing.js";
-import { ResponseFormat, SlicerType } from "../constants.js";
-import {
-  CreateTaskApiResponse,
-  AnalyzePrintabilityApiRequest,
-  RepairPrintabilityApiRequest,
-  MultiColorPrintApiRequest
-} from "../types.js";
+import { TaskCreatedOutputSchema } from "../schemas/output.js";
+import { AUTO_SPLIT_CREDITS, ResponseFormat, SlicerType } from "../constants.js";
+import { CreateTaskApiResponse } from "../types.js";
 import { formatTaskCreatedResponse } from "../utils/response-formatter.js";
+import { buildApiRequest } from "../utils/request-builder.js";
 import {
   detectInstalledSlicers,
   detectSlicer,
@@ -221,12 +220,18 @@ ${launchCmd}
 This is the authoritative way to answer "is this model printable / suitable for 3D printing / ready to print?". Printability here means geometry validity — watertightness, manifold edges, holes, degenerate faces, and volume — measured by this check. It's free, so run it whenever printability is the question, then use the result to decide whether the mesh needs repair (\`meshy_repair_printability\`).
 
 Provide ONE of (input_task_id wins if both are given):
-  - input_task_id: a SUCCEEDED Meshy task. **Must use Meshy 6 or newer** (Meshy 7 / 7.1 included). Supported task types: text-to-3d, image-to-3d, multi-image-to-3d, remesh, retexture.
+  - input_task_id: a SUCCEEDED Meshy task. **Must use Meshy 6 or newer** (Meshy 7 / 7.1 included). Supported task types: text-to-3d, image-to-3d, multi-image-to-3d, remesh, retexture — and print-repair, to re-check a repaired model.
   - model_url: a public URL of a 3D model file (.glb / .gltf / .obj / .fbx / .stl, max 100 MB).
+
+Optional wall-thickness check at the size you plan to print (takes longer): send printer_type, one print size, or both. The result adds printability.thin_walls and intended_print.
 
 Args:
   - input_task_id (string, optional): Upstream Meshy task ID
   - model_url (string, optional): Public model URL
+  - printer_type (enum, optional): "fdm" (1.0 mm min wall), "sla" (0.8 mm), "full_color" (2.0 mm)
+  - intended_print_height_mm (number, optional): 1–1000, GLB / input_task_id only
+  - intended_print_longest_side_mm (number, optional): 1–1000, any format. Send at most one size.
+    With printer_type and no size: 150 mm tall for GLB / tasks, the file's own size for STL, 150 mm longest side otherwise
   - response_format (enum): "markdown" or "json" (default: "markdown")
 
 Returns:
@@ -238,12 +243,13 @@ Next Steps:
     - status: "healthy" / "warning" / "error" / "unknown"
     - issue_count, error_count, warning_count
     - metrics: { is_watertight, volume, non_manifold_edges, degenerate_faces, holes }
-  - status="error" → call meshy_repair_printability before printing.
+  - status="error" → call meshy_repair_printability before printing (pass this analyze task as its input_task_id to reuse the printer and size).
   - status="warning" → repair is optional but recommended for FDM.
 
 Examples:
   - From a task: { input_task_id: "abc-123" }
-  - From a URL:  { model_url: "https://example.com/model.glb" }`,
+  - From a URL:  { model_url: "https://example.com/model.glb" }
+  - Wall check for a 100 mm SLA print: { input_task_id: "abc-123", printer_type: "sla", intended_print_height_mm: 100 }`,
       inputSchema: AnalyzePrintabilityInputSchema,
       annotations: {
         readOnlyHint: false,
@@ -254,18 +260,17 @@ Examples:
     },
     async (params: z.infer<typeof AnalyzePrintabilityInputSchema>) => {
       const source = printSource(params);
-      if (!source) {
-        return {
-          isError: true,
-          content: [{ type: "text", text: MISSING_PRINT_SOURCE }]
-        };
+      const invalid = source ? checkPrintSize(params) : MISSING_PRINT_SOURCE;
+      if (invalid) {
+        return { isError: true, content: [{ type: "text", text: invalid }] };
       }
       try {
-        const request: AnalyzePrintabilityApiRequest = { ...source };
+        const { input_task_id, model_url, ...options } = params;
+        const request = buildApiRequest({ ...source }, options);
 
         const response = await client.post<CreateTaskApiResponse>(
           "/openapi/v1/print/analyze",
-          request as unknown as Record<string, unknown>
+          request
         );
 
         const taskId = response.result;
@@ -309,12 +314,17 @@ Output format mirrors the input format:
   - model_url with .fbx / .gltf → output is FBX / GLTF
 
 Provide ONE of (input_task_id wins if both are given):
-  - input_task_id: a SUCCEEDED Meshy task that produced a GLB asset.
+  - input_task_id: a SUCCEEDED Meshy task that produced a GLB asset (text-to-3d, image-to-3d, multi-image-to-3d, remesh, retexture), or a print-analyze task. An analyze task that checked wall thickness passes on its printer and size.
   - model_url: a public URL of a 3D model (.glb / .gltf / .obj / .fbx / .stl, max 100 MB; .fbx must be https, not a data: URI).
+
+To also thicken walls that are too thin at the planned print size, send printer_type, one print size, or both (same fields as meshy_analyze_printability). Walls are thickened only when more than 5% of the surface is too thin; the model keeps its scale (use meshy_resize to scale it).
 
 Args:
   - input_task_id (string, optional): Upstream Meshy task ID
   - model_url (string, optional): Public model URL
+  - printer_type (enum, optional): "fdm" / "sla" / "full_color"
+  - intended_print_height_mm / intended_print_longest_side_mm (number, optional): 1–1000 mm, at most one
+  - alpha_thumbnail (boolean, optional): also render a transparent-background preview
   - response_format (enum): "markdown" or "json" (default: "markdown")
 
 Returns:
@@ -338,18 +348,17 @@ Examples:
     },
     async (params: z.infer<typeof RepairPrintabilityInputSchema>) => {
       const source = printSource(params);
-      if (!source) {
-        return {
-          isError: true,
-          content: [{ type: "text", text: MISSING_PRINT_SOURCE }]
-        };
+      const invalid = source ? checkPrintSize(params) : MISSING_PRINT_SOURCE;
+      if (invalid) {
+        return { isError: true, content: [{ type: "text", text: invalid }] };
       }
       try {
-        const request: RepairPrintabilityApiRequest = { ...source };
+        const { input_task_id, model_url, ...options } = params;
+        const request = buildApiRequest({ ...source }, options);
 
         const response = await client.post<CreateTaskApiResponse>(
           "/openapi/v1/print/repair",
-          request as unknown as Record<string, unknown>
+          request
         );
 
         const taskId = response.result;
@@ -393,7 +402,9 @@ PREREQUISITES:
 
 IMPORTANT: Before calling, ask the user to confirm:
   - max_colors: depends on their printer's multi-color capability (e.g. Bambu AMS supports 4-16 colors).
-  - max_depth: affects color boundary precision and file size. Higher = finer but larger.
+  - style: "realistic" (default, photo-like detail, larger file) or "cartoon" (flat color regions, smaller file).
+  - printer_brand: whose slicer preset to write into the 3MF (default "bambu").
+  - max_depth (realistic only): color boundary precision vs. file size.
 
 Provide input_task_id or model_url (input_task_id wins if both are given).
 
@@ -401,7 +412,9 @@ Args:
   - input_task_id (string, optional): Task ID of a completed TEXTURED model. Takes priority over model_url.
   - model_url (string, optional): Public URL or data URI of a textured .glb or .fbx model.
   - max_colors (number): Max colors for segmentation (1-16, default: 4). MUST confirm with user based on their printer capability.
-  - max_depth (number): Segmentation depth (3-6, default: 4). Higher = finer separation, larger file. MUST confirm with user.
+  - max_depth (number): Segmentation depth (3-6, default: 4). Higher = finer separation, larger file. realistic style only.
+  - style (enum, optional): "realistic" or "cartoon". realistic needs one base color texture with UVs on every part; cartoon also accepts vertex colors
+  - printer_brand (enum, optional): "bambu" (default), "anycubic", "creality", "elegoo", "flashforge", "prusa", "qidi", "snapmaker", "ankermake"
   - response_format (enum): "markdown" or "json" (default: "markdown")
 
 Returns:
@@ -416,7 +429,8 @@ Next Steps:
 Examples:
   - Default: { input_task_id: "abc-123" }
   - Custom: { input_task_id: "abc-123", max_colors: 8, max_depth: 5 }
-  - From URL: { model_url: "https://example.com/textured.glb", max_colors: 6 }`,
+  - From URL: { model_url: "https://example.com/textured.glb", max_colors: 6 }
+  - Creality preset, flat colors: { input_task_id: "abc-123", style: "cartoon", printer_brand: "creality" }`,
       inputSchema: ProcessMulticolorInputSchema,
       annotations: {
         readOnlyHint: false,
@@ -434,15 +448,12 @@ Examples:
         };
       }
       try {
-        const request: MultiColorPrintApiRequest = {
-          ...source,
-          max_colors: params.max_colors,
-          max_depth: params.max_depth
-        };
+        const { input_task_id, model_url, ...options } = params;
+        const request = buildApiRequest({ ...source }, options);
 
         const response = await client.post<CreateTaskApiResponse>(
           "/openapi/v1/print/multi-color",
-          request as unknown as Record<string, unknown>
+          request
         );
 
         const taskId = response.result;
@@ -461,6 +472,75 @@ Examples:
           "Multi-Color Processing Task Created",
           `Processing ${sourceDesc} into ${params.max_colors} colors (depth: ${params.max_depth}). The output will be a 3MF file for multi-color 3D printing.`,
           "multi-color-print"
+        );
+      } catch (error) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: handleMeshyError(error) }]
+        };
+      }
+    }
+  );
+
+  // ── Auto Split ──────────────────────────────────────────────────
+  server.registerTool(
+    "meshy_auto_split",
+    {
+      title: "Auto Split Model into Printable Parts",
+      description: `Cut a generated model into separately printable parts. Cost: ${AUTO_SPLIT_CREDITS} credits.
+
+Use when a model is too big for the print bed, needs parts printed in different colors/materials, or should be assembled after printing.
+
+Input: input_task_id of a SUCCEEDED image-to-3d, multi-image-to-3d, text-to-3d preview, remesh, convert or resize task made with meshy-6, meshy-7, meshy-7.1 or latest (not low-poly, not Smart Topology). A textured model is accepted, but the texture is not kept.
+
+Args:
+  - input_task_id (string, required)
+  - mode (enum, optional): "auto" (default, Meshy chooses the cuts), "by_parts" (cut along parts named in prompt), "by_color" (cut along color regions named in prompt; image-to-3d / multi-image-to-3d inputs only)
+  - prompt (string): required for by_parts / by_color. Name 1–10 parts ("head, torso, arms, legs"); unnamed geometry becomes one remaining part. If Meshy cannot read the prompt it falls back to auto, still charges, and the task reports prompt_ignored: true
+  - target_formats (string[], optional): extra formats; glb is always produced. Use "3mf" for separately selectable parts in a slicer ("stl" fuses all parts into one solid)
+  - layout (enum, optional): "assembled" (default) or "on_plate" (parts laid flat, ready to slice)
+  - connectors (boolean, optional): add mortise-and-tenon connectors at the cuts; connector_type "cube" | "cylinder", connector_size and connector_height 0.1–0.8
+  - response_format (enum): "markdown" or "json" (default: "markdown")
+
+Next Steps:
+  meshy_get_task_status with task_type "print-split" (the result reports part_count), then meshy_download_model.
+
+Examples:
+  - { input_task_id: "abc-123" }
+  - { input_task_id: "abc-123", mode: "by_parts", prompt: "the figure and the base", target_formats: ["3mf"], connectors: true }`,
+      inputSchema: AutoSplitInputSchema,
+      outputSchema: TaskCreatedOutputSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      }
+    },
+    async (params: z.infer<typeof AutoSplitInputSchema>) => {
+      if ((params.mode === "by_parts" || params.mode === "by_color") && !params.prompt) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: `Error: mode "${params.mode}" needs a prompt naming the parts to split into.` }]
+        };
+      }
+      try {
+        const response = await client.post<CreateTaskApiResponse>(
+          "/openapi/v1/print/split",
+          buildApiRequest({}, params)
+        );
+        const taskId = response.result;
+        return formatTaskCreatedResponse(
+          {
+            task_id: taskId,
+            status: "PENDING",
+            message: `Auto Split started for task "${params.input_task_id}". Cost: ${AUTO_SPLIT_CREDITS} credits.`,
+            estimated_time: "1-2 minutes"
+          },
+          params.response_format,
+          "Auto Split Task Created",
+          `Splitting task "${params.input_task_id}" into printable parts (mode: ${params.mode ?? "auto"}).`,
+          "print-split"
         );
       } catch (error) {
         return {

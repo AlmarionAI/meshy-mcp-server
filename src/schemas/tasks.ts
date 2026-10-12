@@ -30,16 +30,16 @@ export const GetTaskStatusInputSchema = z.object({
 export const ListTasksInputSchema = z.object({
   task_type: z.nativeEnum(TaskType)
     .optional()
-    .describe("Filter by task type. If omitted, queries ALL list-capable task types (text/image/multi-image-to-3d, remesh, retexture, text/image-to-image, convert, resize, uv-unwrap, the print tasks, and the 4 creative-lab products) and merges results. Note: rigging and animation do not have list endpoints."),
+    .describe("Filter by task type. If omitted, queries every task type and merges results."),
   sort_by: z.enum(["+created_at", "-created_at"])
     .default("-created_at")
     .describe("Sort order by creation time. '-created_at' = newest first (default), '+created_at' = oldest first"),
   status: z.nativeEnum(TaskStatus)
     .optional()
-    .describe("Filter by task status"),
+    .describe("Keep only tasks with this status (applied to the fetched page)"),
   phase: z.nativeEnum(TaskPhase)
     .optional()
-    .describe("Filter by task phase"),
+    .describe("Keep only tasks in this phase (applied to the fetched page)"),
   response_format: ResponseFormatSchema
 }).merge(PaginationSchema).strict();
 

@@ -120,6 +120,8 @@ export enum TaskType {
   MULTI_COLOR_PRINT = "multi-color-print",
   PRINT_ANALYZE = "print-analyze",
   PRINT_REPAIR = "print-repair",
+  PRINT_SPLIT = "print-split",
+  TEXT_TO_MOTION = "text-to-motion",
   // Creative Lab — each product carries its own /openapi/creative-lab/<product>/v1 line,
   // and GET/list/delete/stream are STAGE-SPECIFIC: .../v1/prototype/:id and .../v1/build/:id
   // (there is no .../v1/:id). So we need one task type per (product, stage) for correct routing.
@@ -136,10 +138,14 @@ export enum TaskType {
   CREATIVE_LAB_BRICK_FIGURE_PROTOTYPE = "creative-lab-brick-figure-prototype",
   CREATIVE_LAB_BRICK_FIGURE_BUILD = "creative-lab-brick-figure-build",
   CREATIVE_LAB_KEYCAP_PROTOTYPE = "creative-lab-keycap-prototype",
-  CREATIVE_LAB_KEYCAP_BUILD = "creative-lab-keycap-build"
+  CREATIVE_LAB_KEYCAP_BUILD = "creative-lab-keycap-build",
+  CREATIVE_LAB_FIDGET_PIXEL_PROTOTYPE = "creative-lab-fidget-pixel-prototype",
+  CREATIVE_LAB_FIDGET_PIXEL_BUILD = "creative-lab-fidget-pixel-build",
+  // Single stage: one task, no prototype/build split.
+  CREATIVE_LAB_FIDGET_COLLAPSIBLE = "creative-lab-fidget-collapsible"
 }
 
-// Creative Lab products exposed through the OpenAPI (7 of them; the webapp has more).
+// Creative Lab products in the public API.
 export enum CreativeLabProduct {
   FIGURE = "figure",
   LAMP = "lamp",
@@ -147,7 +153,9 @@ export enum CreativeLabProduct {
   FRIDGE_MAGNET = "fridge-magnet",
   VINYL_FIGURE = "vinyl-figure",
   BRICK_FIGURE = "brick-figure",
-  KEYCAP = "keycap"
+  KEYCAP = "keycap",
+  FIDGET_PIXEL = "fidget-pixel",
+  FIDGET_COLLAPSIBLE = "fidget-collapsible"
 }
 
 // Keycap base model — the only value the build stage accepts today (Cherry MX 1u).
@@ -182,12 +190,14 @@ export enum OriginAt {
 
 // Text-to-Image / Image-to-Image Models
 // Credits differ by model and by endpoint:
-//   nano-banana: 3 | nano-banana-2: 6 | nano-banana-pro: 9
+//   nano-banana: 3 | nano-banana-2: 6 | nano-banana-2-lite: 3 | nano-banana-2-1: 4 | nano-banana-pro: 9
 //   GPT Image models (gpt-image-2, gpt-image-2-5-flare, gpt-image-2-5-sunburst):
 //   9 (text-to-image) / 12 (image-to-image).
 export enum TextToImageModel {
   NANO_BANANA = "nano-banana",
   NANO_BANANA_2 = "nano-banana-2",
+  NANO_BANANA_2_LITE = "nano-banana-2-lite",
+  NANO_BANANA_2_1 = "nano-banana-2-1",
   NANO_BANANA_PRO = "nano-banana-pro",
   GPT_IMAGE_2 = "gpt-image-2",
   GPT_IMAGE_2_5_FLARE = "gpt-image-2-5-flare",
@@ -195,7 +205,7 @@ export enum TextToImageModel {
 }
 
 // Aspect Ratios
-// nano-banana / nano-banana-2 / nano-banana-pro accept 1:1, 16:9, 9:16, 4:3, 3:4.
+// The nano-banana models accept 1:1, 16:9, 9:16, 4:3, 3:4.
 // The GPT Image models accept all of those plus 3:2 and 2:3 (GPT-only).
 export enum AspectRatio {
   SQUARE = "1:1",
@@ -228,36 +238,43 @@ export const MULTICOLOR_CAPABLE_SLICERS: SlicerType[] = [
   SlicerType.ANYCUBIC_SLICER
 ];
 
-// Multi-color processing credit cost
+// Printing credit costs
 export const MULTI_COLOR_CREDITS = 10;
 export const PRINT_REPAIR_CREDITS = 10;
 export const PRINT_ANALYZE_CREDITS = 0;
+export const AUTO_SPLIT_CREDITS = 10;
+
+// Motion credit costs
+export const ANIMATE_CREDITS_PER_ACTION = 3;
+export const TEXT_TO_MOTION_CREDITS = { prime: 10, swift: 3 } as const;
+
+// Multi-color slicer presets (printer_brand)
+export const PRINTER_BRANDS = [
+  "bambu", "anycubic", "creality", "elegoo", "flashforge", "prusa", "qidi", "snapmaker", "ankermake"
+] as const;
 
 // Post-processing credit costs
 export const CONVERT_CREDITS = 1;
 export const RESIZE_CREDITS = 1;
 export const UV_UNWRAP_CREDITS = 5;
 
-// Creative Lab credit costs (prototype + build). Most products are 6 + 30 = 36.
-// Keycap is 12 + 50 = 62. Lamp is 30 + 6 = 36: its prototype builds the
-// lampshade model and the build only adds the base plate.
-export const CREATIVE_LAB_PROTOTYPE_CREDITS = 6;
-export const CREATIVE_LAB_BUILD_CREDITS = 30;
-export const CREATIVE_LAB_KEYCAP_PROTOTYPE_CREDITS = 12;
-export const CREATIVE_LAB_KEYCAP_BUILD_CREDITS = 50;
-export const CREATIVE_LAB_LAMP_PROTOTYPE_CREDITS = 30;
-export const CREATIVE_LAB_LAMP_BUILD_CREDITS = 6;
+// Creative Lab credit costs per stage (API pricing page). Collapsible Fidget is
+// a single 6-credit task with no prototype stage.
+const CREATIVE_LAB_STAGE_CREDITS: Record<CreativeLabProduct, { prototype: number; build: number }> = {
+  [CreativeLabProduct.FIGURE]: { prototype: 6, build: 30 },
+  [CreativeLabProduct.KEYCHAIN]: { prototype: 6, build: 30 },
+  [CreativeLabProduct.FRIDGE_MAGNET]: { prototype: 6, build: 30 },
+  [CreativeLabProduct.VINYL_FIGURE]: { prototype: 6, build: 30 },
+  [CreativeLabProduct.BRICK_FIGURE]: { prototype: 6, build: 30 },
+  [CreativeLabProduct.FIDGET_PIXEL]: { prototype: 6, build: 30 },
+  [CreativeLabProduct.KEYCAP]: { prototype: 12, build: 50 },
+  [CreativeLabProduct.LAMP]: { prototype: 30, build: 6 },
+  [CreativeLabProduct.FIDGET_COLLAPSIBLE]: { prototype: 0, build: 6 }
+};
 
 /** Per-product (prototype, build) credit cost. */
 export function creativeLabCredits(product: CreativeLabProduct): { prototype: number; build: number; total: number } {
-  if (product === CreativeLabProduct.KEYCAP) {
-    return { prototype: CREATIVE_LAB_KEYCAP_PROTOTYPE_CREDITS, build: CREATIVE_LAB_KEYCAP_BUILD_CREDITS, total: CREATIVE_LAB_KEYCAP_PROTOTYPE_CREDITS + CREATIVE_LAB_KEYCAP_BUILD_CREDITS };
-  }
-  if (product === CreativeLabProduct.LAMP) {
-    return { prototype: CREATIVE_LAB_LAMP_PROTOTYPE_CREDITS, build: CREATIVE_LAB_LAMP_BUILD_CREDITS, total: CREATIVE_LAB_LAMP_PROTOTYPE_CREDITS + CREATIVE_LAB_LAMP_BUILD_CREDITS };
-  }
-  const prototype = CREATIVE_LAB_PROTOTYPE_CREDITS;
-  const build = CREATIVE_LAB_BUILD_CREDITS;
+  const { prototype, build } = CREATIVE_LAB_STAGE_CREDITS[product];
   return { prototype, build, total: prototype + build };
 }
 

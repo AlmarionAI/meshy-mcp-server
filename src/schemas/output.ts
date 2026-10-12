@@ -19,7 +19,10 @@ export const TaskCreatedOutputSchema = z.object({
  * Output schema for meshy_check_balance
  */
 export const BalanceOutputSchema = z.object({
-  balance: z.number().describe("Current credit balance")
+  balance: z.number().describe("Credits available now (usually monthly_credits + permanent_credits; lower when a member or workspace credit limit applies)"),
+  monthly_credits: z.number().optional().describe("Credits that expire at the next monthly refresh"),
+  permanent_credits: z.number().optional().describe("Credits that never expire (credit packs, rewards)"),
+  monthly_resets_at: z.string().optional().describe("Next monthly refresh (ISO 8601); omitted when none is scheduled")
 });
 
 /**

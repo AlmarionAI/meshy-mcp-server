@@ -77,8 +77,12 @@ export function handleMeshyError(error: unknown, context?: ErrorContext): string
           return `Error: Payment required (402). ${errorData?.message || "Insufficient credits."} ` +
             "Check the balance with `meshy_check_balance`; add credits or upgrade at https://www.meshy.ai/pricing.";
 
-        case 403:
-          return `Error: Permission denied (403). ${errorData?.message || "Your API key may not have access to this resource."}`;
+        case 403: {
+          const hint = tool === "meshy_list_usage"
+            ? " The Usage API is available only to API keys on a Studio or Enterprise team."
+            : "";
+          return `Error: Permission denied (403). ${errorData?.message || "Your API key may not have access to this resource."}${hint}`;
+        }
 
         case 404: {
           if (tool === "meshy_uv_unwrap") {

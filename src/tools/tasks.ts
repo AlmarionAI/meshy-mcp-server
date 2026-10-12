@@ -293,6 +293,22 @@ function buildWaitSuccessResponse(
     lines.push("");
   }
 
+  // Text-to-motion results
+  if (taskType === TaskType.TEXT_TO_MOTION && task.result?.motion_url) {
+    lines.push("## Motion Clip");
+    lines.push(`- ${task.result.motion_format?.toUpperCase() ?? "Clip"}, ${((task.result.duration_ms ?? 0) / 1000).toFixed(1)}s (${task.result.mode ?? "prime"})`);
+    lines.push(`- Apply it to a rigged character: \`meshy_animate\` with motion_task_id "${taskId}" (biped rigs, within 3 days)`);
+    lines.push("");
+  }
+
+  // Auto Split results
+  if (taskType === TaskType.PRINT_SPLIT && task.part_count !== undefined) {
+    lines.push(`## Split Result`);
+    lines.push(`- **Parts**: ${task.part_count}`);
+    if (task.prompt_ignored) lines.push("- The prompt could not be read, so Meshy chose the cuts automatically (prompt_ignored).");
+    lines.push("");
+  }
+
   // Printability results (print-analyze tasks)
   if (taskType === TaskType.PRINT_ANALYZE && task.printability) {
     const p = task.printability;
@@ -311,6 +327,10 @@ function buildWaitSuccessResponse(
     lines.push(`| non-manifold edges | ${m.non_manifold_edges} |`);
     lines.push(`| degenerate faces | ${m.degenerate_faces} |`);
     lines.push(`| holes | ${m.holes} |`);
+    if (p.thin_walls && p.intended_print) {
+      const ratio = p.thin_walls.thin_area_ratio;
+      lines.push(`| thin walls (< ${p.intended_print.wall_thickness_mm} mm, ${p.intended_print.printer_type} at ${p.intended_print.longest_side_mm} mm) | ${p.thin_walls.status}${ratio !== null ? `, ${(ratio * 100).toFixed(1)}% of the surface` : ""} |`);
+    }
     lines.push("");
     if (p.status === "error") {
       lines.push(`**Recommendation**: \`meshy_repair_printability\` (10 credits) before printing — errors block reliable FDM output.`);
@@ -352,7 +372,9 @@ function buildWaitSuccessResponse(
       vertex_count: task.vertex_count,
       face_count: task.face_count,
       consumed_credits: task.consumed_credits,
-      printability: task.printability
+      printability: task.printability,
+      result: task.result,
+      part_count: task.part_count
     }
   };
 }
@@ -582,16 +604,14 @@ ${stillRunning}`
       title: "List Generation Tasks",
       description: `List tasks across all task types with filtering and pagination.
 
-Queries one or all task types. When task_type is omitted, queries ALL 7 list-capable endpoints in parallel and merges results sorted by creation time.
+Queries one or all task types. When task_type is omitted, queries every task type's list endpoint in parallel and merges results sorted by creation time. Use it to find a task whose ID you no longer have — tasks created through the API do not appear in the Meshy web app.
 
 Args:
-  - task_type (enum, optional): Filter by task type. If omitted, queries ALL types and merges results.
-    Supported: "text-to-3d", "image-to-3d", "multi-image-to-3d", "remesh", "retexture", "text-to-image", "image-to-image"
-    Note: "rigging" and "animation" do NOT have list endpoints.
+  - task_type (enum, optional): One task type (any value meshy_get_task_status takes, e.g. "image-to-3d", "rigging", "animation", "print-split", "text-to-motion", "creative-lab-lamp-build"). If omitted, queries ALL types and merges results.
   - sort_by (enum): Sort by creation time - "-created_at" (newest first, default) or "+created_at" (oldest first)
-  - status (enum, optional): Filter by status - "PENDING", "IN_PROGRESS", "SUCCEEDED", "FAILED", "CANCELED"
-  - phase (enum, optional): Filter by phase - "draft", "generate", "texture", "stylize", "animate"
-  - limit (number): Results per page per endpoint, 1-50 (default: 20). When querying all types, total results may be up to 7 × limit.
+  - status (enum, optional): Keep only tasks with this status - "PENDING", "IN_PROGRESS", "SUCCEEDED", "FAILED", "CANCELED". Applied to the fetched page, so a page can come back shorter than limit
+  - phase (enum, optional): Keep only tasks in this phase. Applied to the fetched page, like status
+  - limit (number): Results per page per endpoint, 1-100 (default: 20). When querying all types, the merged list can be much longer.
   - offset (number): Skip N results for pagination (default: 0)
   - response_format (enum): Output format - "markdown" or "json" (default: "markdown")
 
@@ -626,7 +646,7 @@ Error Handling:
     },
     async (params: z.infer<typeof ListTasksInputSchema>) => {
       try {
-        const pageSize = Math.min(params.limit, 50); // API max is 50
+        const pageSize = params.limit; // API max is 100
         const pageNum = Math.floor(params.offset / pageSize) + 1;
         const baseQueryParams: Record<string, string | number> = {
           page_size: pageSize,
@@ -634,8 +654,6 @@ Error Handling:
           sort_by: params.sort_by
         };
 
-        if (params.status) baseQueryParams.status = params.status;
-        if (params.phase) baseQueryParams.phase = params.phase;
 
         // Determine which endpoints to query
         const taskTypesToQuery: TaskType[] = params.task_type
@@ -698,8 +716,10 @@ Error Handling:
             if (result.status === "fulfilled") {
               allTasks.push(...result.value);
             }
-            // Rejected results are silently skipped (partial failure tolerance)
+            // Rejected results are skipped (partial failure tolerance)
           }
+          const failed = results.find(r => r.status === "rejected");
+          if (failed && results.every(r => r.status === "rejected")) throw failed.reason;
 
           // Sort merged results by created_at
           allTasks.sort((a, b) => {
@@ -709,14 +729,20 @@ Error Handling:
           });
         }
 
+        // The list endpoints take only page_num / page_size / sort_by, so
+        // status and phase filter the fetched page here.
+        const fetchedCount = allTasks.length;
+        allTasks = allTasks.filter(t =>
+          (!params.status || t.status === params.status) && (!params.phase || t.phase === params.phase));
+
         const output = {
           page_count: allTasks.length,
           offset: params.offset,
           queried_types: taskTypesToQuery,
           tasks: allTasks,
-          has_more: taskTypesToQuery.length === 1 ? allTasks.length >= pageSize : false,
-          next_offset: taskTypesToQuery.length === 1 && allTasks.length >= pageSize
-            ? params.offset + allTasks.length
+          has_more: taskTypesToQuery.length === 1 ? fetchedCount >= pageSize : false,
+          next_offset: taskTypesToQuery.length === 1 && fetchedCount >= pageSize
+            ? params.offset + fetchedCount
             : undefined
         };
 
@@ -999,19 +1025,59 @@ ${savedPaths.map(p => `- ${p}`).join("\n")}${projectDir ? `\n**Project Folder**:
 
         let fmt = params.format;
 
-        // Creative Lab build products can expose bespoke multi-part model_urls
-        // (e.g. lamp → base_stl + lamp_stl) that don't match the standard `format` keys.
-        // When the requested format isn't a direct key, download every available part.
+        // Text-to-motion: one clip in result.motion_url (FBX for prime, BVH for swift).
+        if (taskType === TaskType.TEXT_TO_MOTION) {
+          const motionUrl = task.result?.motion_url;
+          if (!motionUrl) {
+            return { isError: true, content: [{ type: "text", text: "Error: Task completed but has no motion clip URL." }] };
+          }
+          const ext = `.${task.result?.motion_format || "fbx"}`;
+          let target = params.save_to;
+          let projectDir: string | undefined;
+          if (!target) {
+            projectDir = resolveProjectDir(params.task_id, taskType, task.prompt, params.parent_task_id, task.created_at);
+            target = path.join(projectDir, `motion${ext}`);
+          }
+          const size = await downloadFileToLocal(motionUrl, target);
+          if (projectDir) {
+            recordTask(projectDir, {
+              task_id: params.task_id,
+              task_type: taskType,
+              stage: "motion",
+              prompt: task.prompt,
+              status: task.status,
+              files: [path.basename(target)],
+              created_at: new Date().toISOString()
+            });
+          }
+          return {
+            content: [{
+              type: "text",
+              text: `# Motion Clip Downloaded
+
+**Task ID**: ${params.task_id}
+**Local File**: ${target}
+**Format**: ${ext.slice(1).toUpperCase()}${projectDir ? `\n**Project Folder**: ${projectDir}` : ""}
+
+**Note**: Source URL expires after 24 hours. The local file is permanent.`
+            }],
+            structuredContent: { download_url: motionUrl, local_path: target, project_dir: projectDir, file_size_bytes: size, format: ext.slice(1), expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() }
+          };
+        }
+
+        // Creative Lab products can expose bespoke multi-part model_urls
+        // (e.g. lamp → lamp_stl + base_stl, zip output → bundle_zip) that don't
+        // match the standard `format` keys. When the requested format isn't a
+        // direct key, download every available part.
         if (
           taskType.startsWith("creative-lab-") &&
-          taskType.endsWith("-build") &&
           task.model_urls &&
           !task.model_urls[fmt as keyof typeof task.model_urls]
         ) {
           const parts = (Object.entries(task.model_urls) as [string, string][]).filter(([, v]) => Boolean(v));
           if (parts.length > 0) {
             const modelExt = (u: string) => {
-              const m = u.split("?")[0].match(/\.(glb|gltf|obj|mtl|fbx|usdz|stl|3mf|blend)$/i);
+              const m = u.split("?")[0].match(/\.(glb|gltf|obj|mtl|fbx|usdz|stl|3mf|blend|zip)$/i);
               return m ? `.${m[1].toLowerCase()}` : "";
             };
             const clPaths: string[] = [];

@@ -1,5 +1,5 @@
 /**
- * Post-processing tools (remesh, retexture, rig, animate)
+ * Post-processing tools (remesh, retexture, rig, animate, text-to-motion, animation library)
  */
 
 import { z } from "zod";
@@ -10,10 +10,18 @@ import {
   RemeshInputSchema,
   RetextureInputSchema,
   RigInputSchema,
-  AnimateInputSchema
+  AnimateInputSchema,
+  TextToMotionInputSchema,
+  ListAnimationsInputSchema
 } from "../schemas/postprocessing.js";
 import { TaskCreatedOutputSchema } from "../schemas/output.js";
-import { ResponseFormat, RIGGING_MAX_FACES } from "../constants.js";
+import {
+  ANIMATE_CREDITS_PER_ACTION,
+  CHARACTER_LIMIT,
+  ResponseFormat,
+  RIGGING_MAX_FACES,
+  TEXT_TO_MOTION_CREDITS
+} from "../constants.js";
 import { formatTaskCreatedResponse } from "../utils/response-formatter.js";
 import { checkTextureResolution } from "../utils/generation-options.js";
 import { getTaskWithAutoInference } from "../services/meshy-client.js";
@@ -22,7 +30,8 @@ import {
   RemeshApiRequest,
   RetextureApiRequest,
   RigApiRequest,
-  AnimateApiRequest
+  AnimateApiRequest,
+  LibraryAnimation
 } from "../types.js";
 
 /**
@@ -433,15 +442,18 @@ The model exceeds the ${maxFaces}-face limit for rigging.
     "meshy_animate",
     {
       title: "Animate Rigged 3D Character",
-      description: `Apply a CUSTOM animation to a rigged 3D character using Meshy AI. Cost: 3 credits.
+      description: `Apply a CUSTOM animation to a rigged 3D character using Meshy AI. Cost: 3 credits per action.
 
 NOTE: Walking and running animations are already FREE with meshy_rig. Only use this tool for CUSTOM animations (dancing, jumping, fighting, etc.) that are NOT included in rigging.
 
-Applies a predefined animation action to a character that has been rigged with meshy_rig.
+Give exactly ONE animation source:
+  - action_id: one preset action. Find ids with meshy_list_animations (free) — never guess an id.
+  - action_ids: 1–10 unique preset ids, returned as ONE file with one clip per action, in the given order (3 credits each)
+  - motion_task_id: a SUCCEEDED meshy_text_to_motion task, retargeted onto the character (biped rigs only; apply within 3 days)
 
 Args:
   - rig_task_id (string): Task ID of the completed rigging task (required)
-  - action_id (number): Integer ID of the animation action to apply (required)
+  - action_id (number) / action_ids (number[]) / motion_task_id (string): the animation source, exactly one
   - post_process (object, optional): Optional post-processing to apply after animation:
     - operation_type (enum): "change_fps", "fbx2usdz", or "extract_armature"
     - fps (number, optional): Target FPS for change_fps operation (24, 25, 30, or 60)
@@ -460,6 +472,8 @@ Next Steps:
 
 Examples:
   - Basic animate: { rig_task_id: "abc-123", action_id: 1 }
+  - Several clips in one file: { rig_task_id: "abc-123", action_ids: [1, 4, 92] }
+  - Generated motion: { rig_task_id: "abc-123", motion_task_id: "def-456" }
   - With FPS change: { rig_task_id: "abc-123", action_id: 1, post_process: { operation_type: "change_fps", fps: 30 } }
 
 Error Handling:
@@ -475,11 +489,18 @@ Error Handling:
       }
     },
     async (params: z.infer<typeof AnimateInputSchema>) => {
-      try {
-        const request: AnimateApiRequest = {
-          rig_task_id: params.rig_task_id,
-          action_id: params.action_id
+      const sources = [params.action_id !== undefined, params.action_ids !== undefined, params.motion_task_id !== undefined];
+      if (sources.filter(Boolean).length !== 1) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: "Error: give exactly one of action_id, action_ids or motion_task_id." }]
         };
+      }
+      try {
+        const request: AnimateApiRequest = { rig_task_id: params.rig_task_id };
+        if (params.action_id !== undefined) request.action_id = params.action_id;
+        if (params.action_ids) request.action_ids = params.action_ids;
+        if (params.motion_task_id) request.motion_task_id = params.motion_task_id;
 
         if (params.post_process) {
           request.post_process = params.post_process;
@@ -499,7 +520,11 @@ Error Handling:
           output,
           params.response_format,
           "Animation Task Created",
-          "Applying custom animation to the rigged character.",
+          params.action_ids
+            ? `Applying ${params.action_ids.length} actions as clips in one file (${params.action_ids.length * ANIMATE_CREDITS_PER_ACTION} credits).`
+            : params.motion_task_id
+              ? `Applying the motion clip of task "${params.motion_task_id}" to the rigged character.`
+              : "Applying custom animation to the rigged character.",
           "animation"
         );
       } catch (error) {
@@ -509,6 +534,134 @@ Error Handling:
             type: "text",
             text: handleMeshyError(error)
           }]
+        };
+      }
+    }
+  );
+
+  // Text-to-motion tool
+  server.registerTool(
+    "meshy_text_to_motion",
+    {
+      title: "Generate Motion Clip from Text",
+      description: `Generate a character motion clip from a text description. Cost: ${TEXT_TO_MOTION_CREDITS.prime} credits (prime) or ${TEXT_TO_MOTION_CREDITS.swift} (swift) — confirm with the user first.
+
+The clip is skeleton motion, not a model. Apply it to a rigged character with meshy_animate (motion_task_id), or download it (meshy_download_model) for your own retargeting. Clips are kept for 3 days.
+
+Args:
+  - prompt (string): the motion, max 400 characters (required)
+  - duration (number): seconds, 2–10 in steps of 0.5 (required)
+  - mode (enum, optional): "prime" (default, highest quality, FBX, 10 credits) or "swift" (faster, BVH, 3 credits)
+  - response_format (enum): "markdown" or "json" (default: "markdown")
+
+Next Steps:
+  meshy_get_task_status with task_type "text-to-motion", then meshy_animate with motion_task_id (biped rig), or meshy_download_model.
+
+Examples:
+  - { prompt: "a boxer throws a jab-cross combo", duration: 4 }
+  - Quick draft: { prompt: "a happy skip forward", duration: 3, mode: "swift" }`,
+      inputSchema: TextToMotionInputSchema,
+      outputSchema: TaskCreatedOutputSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      }
+    },
+    async (params: z.infer<typeof TextToMotionInputSchema>) => {
+      try {
+        const request: Record<string, unknown> = { prompt: params.prompt, duration: params.duration };
+        if (params.mode) request.mode = params.mode;
+        const response = await client.post<CreateTaskApiResponse>("/openapi/v1/text-to-motion", request);
+        const taskId = response.result;
+        const mode = params.mode ?? "prime";
+        return formatTaskCreatedResponse(
+          {
+            task_id: taskId,
+            status: "PENDING",
+            message: `Text-to-motion task created (${mode}, ${TEXT_TO_MOTION_CREDITS[mode]} credits). Task ID: ${taskId}`,
+            estimated_time: "10-30 seconds"
+          },
+          params.response_format,
+          "Text-to-Motion Task Created",
+          `Generating a ${params.duration}s ${mode === "prime" ? "FBX" : "BVH"} motion clip: "${params.prompt}"`,
+          "text-to-motion"
+        );
+      } catch (error) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: handleMeshyError(error) }]
+        };
+      }
+    }
+  );
+
+  // Animation library lookup
+  server.registerTool(
+    "meshy_list_animations",
+    {
+      title: "Find Animation Actions",
+      description: `Look up preset animations in Meshy's animation library — the action ids meshy_animate takes. Free.
+
+Filters combine (each narrows the result); with no filter the whole library is returned, which is long, so prefer search or category.
+
+Args:
+  - search (string, optional): substring of the name or key, e.g. "walk", "punch", "dance"
+  - category (enum, optional): "WalkAndRun", "BodyMovements", "DailyActions", "Fighting", "Dancing"
+  - sub_category (string, optional): e.g. "AttackingwithWeapon"
+  - action_ids (number[], optional): resolve specific ids (missing ones are retired)
+  - response_format (enum): "markdown" or "json" (default: "markdown")
+
+Returns: [{ action_id, name, key, category, sub_category, preview_url }] — preview_url is an animated GIF of the action.
+
+Examples:
+  - { search: "jump" }
+  - { category: "Dancing" }`,
+      inputSchema: ListAnimationsInputSchema,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true
+      }
+    },
+    async (params: z.infer<typeof ListAnimationsInputSchema>) => {
+      try {
+        const query: Record<string, unknown> = {};
+        if (params.search) query.search = params.search;
+        if (params.category) query.category = params.category;
+        if (params.sub_category) query.sub_category = params.sub_category;
+        if (params.action_ids) query.action_ids = params.action_ids.join(",");
+
+        const data = await client.get<LibraryAnimation[]>("/openapi/v1/animations/library", query);
+        const animations = Array.isArray(data) ? data : [];
+
+        let textContent: string;
+        if (params.response_format === ResponseFormat.MARKDOWN) {
+          textContent = [
+            `# Animation Library (${animations.length} match${animations.length === 1 ? "" : "es"})`,
+            "",
+            "| action_id | Name | Category / Sub-category | Preview |",
+            "|---|---|---|---|",
+            ...animations.map(a => `| ${a.action_id} | ${a.name} | ${a.category} / ${a.sub_category} | ${a.preview_url} |`)
+          ].join("\n");
+        } else {
+          textContent = JSON.stringify(animations, null, 2);
+        }
+        if (textContent.length > CHARACTER_LIMIT) {
+          textContent = textContent.slice(0, CHARACTER_LIMIT) +
+            "\n\n[Truncated: narrow the result with search, category or sub_category.]";
+        }
+
+        return {
+          content: [{ type: "text", text: textContent }],
+          structuredContent: { count: animations.length, animations }
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: handleMeshyError(error) }]
         };
       }
     }

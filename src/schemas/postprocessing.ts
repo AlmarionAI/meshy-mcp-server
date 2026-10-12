@@ -132,7 +132,18 @@ export const AnimateInputSchema = z.object({
     .describe("Task ID of the completed rigging task to animate"),
   action_id: z.number()
     .int("Action ID must be an integer")
-    .describe("ID of the animation action to apply"),
+    .optional()
+    .describe("One preset action from the animation library (look ids up with meshy_list_animations). Give exactly one of action_id, action_ids, motion_task_id."),
+  action_ids: z.array(z.number().int())
+    .min(1)
+    .max(10)
+    .refine(ids => new Set(ids).size === ids.length, "action_ids must be unique")
+    .optional()
+    .describe("1–10 unique preset action ids, returned as ONE file with one clip per action (in this order) — e.g. for a game-engine state machine. 3 credits per action."),
+  motion_task_id: z.string()
+    .min(1)
+    .optional()
+    .describe("A SUCCEEDED meshy_text_to_motion task whose clip to apply (biped rigs only; apply it within 3 days, before the clip expires)."),
   post_process: z.object({
     operation_type: z.nativeEnum(AnimationPostProcessOp)
       .describe("Post-processing operation to apply"),
@@ -149,3 +160,46 @@ export const AnimateInputSchema = z.object({
     .describe("Optional post-processing to apply after animation"),
   response_format: ResponseFormatSchema
 }).strict();
+
+/**
+ * Text-to-motion input schema
+ */
+export const TextToMotionInputSchema = z.object({
+  prompt: z.string()
+    .min(1, "Prompt is required")
+    .max(400, "Prompt must not exceed 400 characters")
+    .describe("Natural-language description of the motion, e.g. 'a character jumps over a gap and lands in a crouch'. Max 400 characters."),
+  duration: z.number()
+    .min(2, "Duration must be at least 2 seconds")
+    .max(10, "Duration cannot exceed 10 seconds")
+    .multipleOf(0.5, "Duration must be a multiple of 0.5 seconds")
+    .describe("Clip length in seconds: 2–10 in steps of 0.5."),
+  mode: z.enum(["prime", "swift"])
+    .optional()
+    .describe("'prime' (API default): highest quality, FBX, 10 credits. 'swift': faster and cheaper, BVH, 3 credits."),
+  response_format: ResponseFormatSchema
+}).strict();
+
+/**
+ * Animation library lookup input schema
+ */
+export const ListAnimationsInputSchema = z.object({
+  search: z.string()
+    .min(1)
+    .optional()
+    .describe("Case-insensitive substring of the animation name or key, e.g. 'walk', 'punch', 'dance'."),
+  category: z.enum(["WalkAndRun", "BodyMovements", "DailyActions", "Fighting", "Dancing"])
+    .optional()
+    .describe("Only this category."),
+  sub_category: z.string()
+    .min(1)
+    .optional()
+    .describe("Only this sub-category, e.g. 'AttackingwithWeapon'. Names repeat across categories, so pair it with category to be exact."),
+  action_ids: z.array(z.number().int())
+    .min(1)
+    .max(200)
+    .optional()
+    .describe("Resolve these ids (up to 200); ids that no longer exist are simply absent."),
+  response_format: ResponseFormatSchema
+}).strict();
+
