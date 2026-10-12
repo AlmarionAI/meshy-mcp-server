@@ -18,15 +18,18 @@ Before calling ANY tool that costs credits, present the cost and wait for user c
 | meshy_retexture | 10 (15 with texture_resolution "8k") |
 | meshy_remesh | 5 |
 | meshy_rig | 5 (includes walking + running) |
-| meshy_animate | 3 |
+| meshy_animate | 3 per action (action_ids: 3 × number of actions) |
+| meshy_text_to_motion | 10 (prime) / 3 (swift) |
 | meshy_analyze_printability | 0 (free) |
 | meshy_repair_printability | 10 |
 | meshy_process_multicolor | 10 |
+| meshy_auto_split | 10 |
 | meshy_convert | 1 |
 | meshy_resize | 1 |
 | meshy_uv_unwrap | 5 |
-| meshy_creative_lab | 36 (6 + 30; lamp is 30 + 6) — EXCEPT keycap, which is 62 (12 + 50) |
-| meshy_text_to_image / meshy_image_to_image | nano-banana 3 / nano-banana-2 6 / nano-banana-pro 9 / GPT Image models (gpt-image-2, gpt-image-2-5-flare, gpt-image-2-5-sunburst): text 9, image 12 |
+| meshy_creative_lab | 36 (6 + 30; lamp is 30 + 6) — EXCEPT keycap 62 (12 + 50) and fidget-collapsible 6 (single stage) |
+| meshy_text_to_image / meshy_image_to_image | nano-banana 3 / nano-banana-2 6 / nano-banana-2-lite 3 / nano-banana-2-1 4 / nano-banana-pro 9 / GPT Image models (gpt-image-2, gpt-image-2-5-flare, gpt-image-2-5-sunburst): text 9, image 12 |
+| meshy_check_balance / meshy_list_usage / meshy_list_animations / status, list, download | 0 (free) |
 
 ### 3D generation cost (image-to-3d / multi-image-to-3d)
 | ai_model | mesh only | + 2K/4K texture | + 8K texture |
@@ -37,7 +40,7 @@ Before calling ANY tool that costs credits, present the cost and wait for user c
 | meshy-t2 (smart-topology, single-image only) | 5 | 15 | 20 |
 
 Ultra geometry (geometry_resolution "2k" or "4k", or the deprecated ultra_mode) adds **+5** on meshy-7.1 / latest. Multi-image takes "2k" but not "4k".
-Legacy ids: meshy-7 is deprecated and billed like meshy-7.1; meshy-5 is retired and not accepted (use meshy-6-lite); model_type "lowpoly" is billed like meshy-6 and retires on 2026-10-30 (use smart-topology + meshy-t2).
+Legacy ids: meshy-7 is deprecated and billed like meshy-7.1; meshy-5 is retired and not accepted (use meshy-6-lite); meshy-t1 is deprecated (use meshy-t2); model_type "lowpoly" is billed like meshy-6 and retires on 2026-10-30 (use smart-topology + meshy-t2).
 texture_resolution "8k" costs 5 more than 2K/4K — always confirm it explicitly.
 
 ### Current generation routing
@@ -48,12 +51,15 @@ Standard target_polycount requires should_remesh true and is superseded by decim
 Refine ai_model is optional: omit it to inherit the preview model. T2 is not an explicit refine override.
 image_enhancement applies to Meshy 6/7.1/latest. remove_lighting applies to Meshy 6 only, except on multi-image where 7.1/latest honor it too.
 Multi-image can drive the texture from 1–4 views of the same object (texture_image_urls, meshy-7.1/latest only).
-Prices above match https://docs.meshy.ai/en/api/pricing as of 2026-10-05; point the user there if a number looks off.
+Prices above match https://docs.meshy.ai/en/api/pricing as of 2026-10-12; point the user there if a number looks off.
 
-## Rule 2: Determine Output Format BEFORE Generating
+## Rule 2: Never Re-create a Task You Are Unsure About
+If a create call fails with a timeout, network error or 5xx, the task may still have been created and charged. Check meshy_list_tasks for it before calling the create tool again. When meshy_get_task_status runs out of wait time, the task keeps running on Meshy: call it again with the same task_id instead of starting over. Meshy advises allowing up to 60 minutes from creation.
+
+## Rule 3: Determine Output Format BEFORE Generating
 The API parameter target_formats controls which formats are produced. Decide the output format before calling any generation tool, because target_formats must be set at creation time. Ask user about their intended use first.
 
-## Rule 3: Identify the Use Case, Then Confirm with User
+## Rule 4: Identify the Use Case, Then Confirm with User
 Determine which scenario below best matches, present a suggested plan to the user, and confirm before executing. Do not mix steps across scenarios.
 
 ---
@@ -66,15 +72,17 @@ Suggested flow:
 1. Detect installed slicers (meshy_send_to_slicer, slicer_type:"auto") — present list, save for later
 2. Generate untextured model (text-to-3d or image-to-3d) with target_formats:["obj"]
 3. Wait for completion
-4. Download OBJ with print_ready=true (auto coordinate fix for slicer)
-5. Present slicer list from step 1, ask user which to use, execute launch_command via Bash
+4. Optionally check printability (meshy_analyze_printability, free; pass printer_type and a print size to also check wall thickness), and repair if it reports errors
+5. Download OBJ with print_ready=true (auto coordinate fix for slicer)
+6. Present slicer list from step 1, ask user which to use, execute launch_command via Bash
+If the model must be printed in pieces (too big for the bed, separate colors or materials), use Scenario L.
 
 ## Scenario B: 3D Printing (multicolor)
 Trigger: user wants multicolor/color print.
 Suggested flow:
 1. Detect multicolor-capable slicers (meshy_send_to_slicer, is_multicolor:true) — present list, save for later
 2. Generate a textured model — via text-to-3d (preview + refine) or image-to-3d with textures
-3. Multi-color processing (meshy_process_multicolor) with input_task_id from the textured task — 10 credits, outputs 3MF
+3. Multi-color processing (meshy_process_multicolor) with input_task_id from the textured task — 10 credits, outputs 3MF. Ask for style (realistic / cartoon) and printer_brand (writes that brand's slicer preset; default bambu)
 4. Wait for completion (task_type:"multi-color-print")
 5. Download 3MF
 6. Present slicer list from step 1, ask user which to use, execute launch_command via Bash
@@ -93,7 +101,9 @@ Suggested flow:
 1. Generate model with pose_mode:"t-pose"
 2. Add textures (refine or retexture)
 3. Rig the model (meshy_rig, ≤300K faces; if over, remesh to reduce polycount first)
-4. Download — rigging includes walking+running free. Only use meshy_animate for custom animations.
+4. Download — rigging includes walking+running free. Only use meshy_animate for custom animations:
+   - preset actions: look up action ids with meshy_list_animations (free) — never guess ids. action_ids puts up to 10 clips in one file (3 credits each)
+   - a described motion ("a backflip into a crouch"): meshy_text_to_motion (prime 10 / swift 3 credits), then meshy_animate with motion_task_id (biped rigs only)
 
 ## Scenario E: AR / Apple
 Trigger: user mentions AR, USDZ, Vision Pro, Quick Look.
@@ -126,12 +136,12 @@ Suggested flow:
 2. meshy_uv_unwrap (5 credits) with input_task_id or model_url.
 3. Wait for completion (task_type "uv-unwrap"), then meshy_download_model (format "glb"). The output is a single GLB with fresh UVs and a placeholder material.
 
-## Scenario J: Creative Lab Consumer Products (7 products)
-Trigger: user wants a stylized physical-product model from a photo — chibi figure, vinyl figure, brick minifigure, keychain, fridge magnet, keycap, or lamp. Every product needs a photo; none take a text prompt.
+## Scenario J: Creative Lab Consumer Products (9 products)
+Trigger: user wants a stylized physical-product model from a photo — chibi figure, vinyl figure, brick minifigure, keychain, fridge magnet, keycap, lamp, pixel-art fidget board, or collapsible ring fidget. Every product needs a photo; none take a text prompt.
 Suggested flow:
-1. Confirm the cost: 36 credits for figure / vinyl-figure / brick-figure / keychain / fridge-magnet / lamp, but **62 for keycap**.
-2. Call meshy_creative_lab once with product + an image source (file_path / image_url). It runs the full prototype→build pipeline internally and returns the final 3D model — the intermediate concept image is internal and is NOT shown to the user. For keycap you may also pass head_size_mm (10–40, default 23).
-3. Download the result with meshy_download_model (task_type "creative-lab-{product}-build"); for lamp this saves all parts (lamp + base STLs).
+1. Confirm the cost: 36 credits for figure / vinyl-figure / brick-figure / keychain / fridge-magnet / lamp / fidget-pixel, **62 for keycap**, **6 for fidget-collapsible**.
+2. Call meshy_creative_lab once with product + an image source (file_path / image_url). It runs the whole pipeline internally and returns the final 3D model — the intermediate concept image is internal and is NOT shown to the user. Product options: keychain name_text (engraving, ≤10 characters); fidget-pixel pixel_subject (person / other, required); keycap head_size_mm / vertical_offset_mm; build_options and output_format for keychain, fridge-magnet, lamp and fidget-pixel.
+3. Download the result with meshy_download_model and the task_type the tool reports; every part is saved (e.g. lamp + base STLs).
 
 ## Scenario K: Cleaner Topology / Part-Separated Geometry (cheaply)
 Trigger: user wants an editable, part-separated, or lower-poly model from an image or text.
@@ -140,6 +150,13 @@ Suggested flow:
 2. Call meshy_image_to_3d or meshy_text_to_3d with model_type:"smart-topology", ai_model:"meshy-t2", and target_polycount (100–15,000). Set should_texture false on the image route when only geometry is approved.
 3. Text preview produces an untextured mesh; separately confirm refine before texturing. Do not force a refine model override.
 4. Multi-image does not offer Smart Topology. Deprecated lowpoly is not the preferred route.
+
+## Scenario L: Print in Parts (Auto Split)
+Trigger: model is too big for the print bed, or parts should be printed separately / in different colors and assembled.
+Suggested flow:
+1. Source must be a SUCCEEDED image-to-3d, multi-image-to-3d, text-to-3d preview, remesh, convert or resize task on Meshy 6 / 7 / 7.1 (not low-poly or Smart Topology).
+2. Confirm 10 credits and how to cut: mode "auto", or "by_parts" / "by_color" with a prompt naming 1–10 parts. Offer connectors so the pieces fit together, layout "on_plate" for print-ready placement, and target_formats ["3mf"] for separately selectable parts in a slicer.
+3. meshy_auto_split, wait (task_type "print-split"), then meshy_download_model.
 
 ## Scenario G: General 3D Model (default)
 Trigger: none of the above.

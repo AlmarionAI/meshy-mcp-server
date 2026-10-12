@@ -4,22 +4,24 @@
 
 ## Features
 
-24 tools covering the full Meshy API:
+28 tools covering the full Meshy API:
 
 | Category | Tools |
 |----------|-------|
 | **3D Generation** | `meshy_text_to_3d`, `meshy_text_to_3d_refine`, `meshy_image_to_3d`, `meshy_multi_image_to_3d` |
-| **Creative Lab** | `meshy_creative_lab` (7 products) |
-| **Post-Processing** | `meshy_remesh`, `meshy_retexture`, `meshy_rig`, `meshy_animate` |
+| **Creative Lab** | `meshy_creative_lab` (9 products) |
+| **Post-Processing** | `meshy_remesh`, `meshy_retexture` |
+| **Rigging & Animation** | `meshy_rig`, `meshy_animate`, `meshy_text_to_motion`, `meshy_list_animations` |
 | **Conversion** | `meshy_convert`, `meshy_resize`, `meshy_uv_unwrap` |
 | **Image Generation** | `meshy_text_to_image`, `meshy_image_to_image` |
 | **Task Management** | `meshy_get_task_status`, `meshy_list_tasks`, `meshy_cancel_task`, `meshy_download_model` |
 | **Workspace** | `meshy_list_models` |
-| **3D Printing** | `meshy_send_to_slicer`, `meshy_analyze_printability`, `meshy_repair_printability`, `meshy_process_multicolor` |
-| **Account** | `meshy_check_balance` |
+| **3D Printing** | `meshy_send_to_slicer`, `meshy_analyze_printability`, `meshy_repair_printability`, `meshy_process_multicolor`, `meshy_auto_split` |
+| **Account** | `meshy_check_balance`, `meshy_list_usage` |
 
 ### Key Capabilities
 
+- **Safe retries (v0.6.3)**: a create request is never resent after a timeout or server error, so a task is never created and billed twice; status checks retry at the API's suggested interval
 - **Text to 3D**: Generate 3D models from text descriptions (preview + refine pipeline)
 - **Image to 3D**: Convert single or multiple images into 3D models
 - **Meshy 7.1 (v0.6.0)**: `ai_model: "meshy-7.1"` (and `latest`) on text-to-3d, image-to-3d and multi-image-to-3d. `geometry_resolution: "standard" | "2k" | "4k"` picks the geometry pass (+5 credits for 2k/4k; multi-image supports standard/2k). `ultra_mode` is deprecated
@@ -28,14 +30,17 @@
 - **Multi-view texture on multi-image (v0.6.0)**: `texture_image_urls` — 1–4 views of the same object drive the texture (Meshy 7.1)
 - **8K Textures (v0.5.0)**: `texture_resolution: "2k" | "4k" | "8k"` on image-to-3d, multi-image-to-3d, text-to-3d refine and retexture (8K costs 15 credits vs 10). Replaces the now-deprecated `hd_texture` flag
 - **Multi-view Retexture (v0.5.0)**: `multiview_image_urls` — 1–4 ordered views of the *same object* drive the texture instead of a single style reference (requires Meshy 7)
-- **Auto-Rigging & Animation**: Add skeletons and animations to humanoid characters
-- **Creative Lab**: One tool — a photo → a finished, print-ready product. **7 products (v0.5.0)**: figure, lamp, keychain, fridge-magnet, vinyl-figure, brick-figure and keycap. Runs prototype→build end-to-end and returns only the final 3D model
+- **Auto-Rigging & Animation**: Add skeletons and animations to humanoid characters. `meshy_animate` takes one preset action, up to 10 actions as clips in one file, or a generated motion (v0.6.3); `meshy_list_animations` finds action ids
+- **Text to Motion (v0.6.3)**: generate a motion clip from a description (`prime` FBX, 10 credits / `swift` BVH, 3 credits) and apply it to a rigged character
+- **Creative Lab**: One tool — a photo → a finished, print-ready product. **9 products**: figure, lamp, keychain (with engraved `name_text`), fridge-magnet, vinyl-figure, brick-figure, keycap, and (v0.6.3) fidget-pixel and fidget-collapsible. Runs the whole pipeline and returns only the final 3D model; build options and output format are configurable
 - **Format & Size Utilities**: `convert` (format conversion incl. 3MF, 1 credit), `resize` (real-world dimensions, 1 credit), `uv_unwrap` (clean UV layout for external texturing, 5 credits)
-- **2D Image Models**: `text_to_image` / `image_to_image` support `nano-banana`, `nano-banana-2`, `nano-banana-pro`, `gpt-image-2`, `gpt-image-2-5-flare` and `gpt-image-2-5-sunburst`
+- **2D Image Models**: `text_to_image` / `image_to_image` support `nano-banana`, `nano-banana-2`, `nano-banana-2-lite`, `nano-banana-2-1`, `nano-banana-pro`, `gpt-image-2`, `gpt-image-2-5-flare` and `gpt-image-2-5-sunburst`, with transparent-background output (`remove_background`). Image-to-image can edit an earlier result by `input_task_id`
 - **3D Printability Suite**:
-  - `analyze_printability` — free FDM check (watertight, volume, holes, non-manifold edges, degenerate faces)
-  - `repair_printability` — 10-credit topology repair, now also accepting **.fbx / .gltf** input (v0.5.0)
-  - `process_multicolor` — 10-credit multi-color 3MF for AMS/MMU printers
+  - `analyze_printability` — free check (watertight, volume, holes, non-manifold edges, degenerate faces), plus a wall-thickness check for a given printer type and print size (v0.6.3)
+  - `repair_printability` — 10-credit topology repair (.glb / .gltf / .obj / .fbx / .stl) that can also thicken thin walls
+  - `process_multicolor` — 10-credit multi-color 3MF for AMS/MMU printers, `realistic` or `cartoon` style, with a slicer preset for 9 printer brands
+  - `auto_split` (v0.6.3) — 10 credits: cut a model into printable parts automatically, by named parts, or by color, with optional connectors
+- **Usage reporting (v0.6.3)**: `list_usage` lists finished API tasks with their credits (Studio / Enterprise teams)
 - **Slicer Integration**: Auto-detect 7 installed slicers (OrcaSlicer, Bambu, Creality, Elegoo, Anycubic, PrusaSlicer, Cura) and return launch commands the agent can execute
 - **Smart File Organization**: Auto-saves to `meshy_output/` with project folders, metadata, and history tracking
 - **Built-in Workflow Intelligence**: Server instructions guide the agent through correct tool chains for each use case
@@ -51,7 +56,7 @@
 | `meshy_multi_image_to_3d` | `meshy-7.1`, `meshy-6`, `meshy-6-lite`, `latest` (no Smart Topology) | Meshy 7.1 |
 | `meshy_retexture` | `meshy-7`, `meshy-6`, `meshy-6-lite`, `latest` (no `meshy-7.1`) | Meshy 7 |
 
-Legacy ids still accepted: `meshy-7` on generation (deprecated, billed like `meshy-7.1`) and single-image `meshy-t1`. `meshy-5` is retired and no longer accepted.
+Legacy ids still accepted: `meshy-7` on generation (deprecated, billed like `meshy-7.1`) and single-image `meshy-t1` (deprecated; use `meshy-t2`). `meshy-5` is retired and no longer accepted.
 
 Generation cost ([pricing](https://docs.meshy.ai/en/api/pricing)):
 
@@ -66,7 +71,7 @@ Text-to-3D preview is billed mesh-only; refine adds 10 (15 at 8K). `geometry_res
 
 Smart Topology (`meshy-t2`) generates directly at `target_polycount` (100–15,000 faces, default 4,000) and skips remeshing. For standard models, `target_polycount` needs `should_remesh: true` and is overridden by `decimation_mode`.
 
-Retexture is 10 credits (15 at 8K). Creative Lab is **36** credits for every product (6 + 30; lamp is 30 + 6) except **keycap, which is 62** (12 + 50). Other tools: remesh 5, rig 5, animate 3, convert 1, resize 1, uv-unwrap 5, analyze-printability free, repair-printability 10, multicolor 10.
+Retexture is 10 credits (15 at 8K). Creative Lab is **36** credits per product (6 + 30; lamp is 30 + 6) except **keycap, 62** (12 + 50) and **fidget-collapsible, 6** (single stage). Images: nano-banana 3, nano-banana-2 6, nano-banana-2-lite 3, nano-banana-2-1 4, nano-banana-pro 9, GPT Image models 9 (text) / 12 (image). Other tools: remesh 5, rig 5, animate 3 per action, text-to-motion 10 (prime) / 3 (swift), convert 1, resize 1, uv-unwrap 5, analyze-printability free, repair-printability 10, multicolor 10, auto-split 10.
 
 ## Prerequisites
 

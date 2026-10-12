@@ -7,7 +7,7 @@ import { registerBalanceTool } from "../dist/tools/balance.js";
 import { registerCreativeLabTools } from "../dist/tools/creative-lab.js";
 import { registerTaskTools } from "../dist/tools/tasks.js";
 
-// Offline request checks for the endpoints and options added or changed in 0.7.0.
+// Offline request checks for the endpoints and options added or changed in 0.6.3.
 // The fake client answers every GET with a finished task of the type the path
 // implies, so tools that wait (Creative Lab) run to completion instantly.
 
