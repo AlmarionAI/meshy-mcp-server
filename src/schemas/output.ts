@@ -43,6 +43,8 @@ export const TaskStatusOutputSchema = z.object({
   face_count: z.number().optional().describe("Number of faces in the model"),
   consumed_credits: z.number().optional().describe("Credits consumed by the task (0 for FAILED — credits are refunded on failure)"),
   // error fields
-  error_code: z.string().optional().describe("Error code if task failed"),
-  error_message: z.string().optional().describe("Error message if task failed")
+  error_type: z.string().optional().describe("Failure category if the task failed: invalid_input (fix the input), timeout / service_unavailable / server_error (refunded; create it again)"),
+  error_code: z.string().optional().describe("Specific error code if the task failed, e.g. image_too_complex"),
+  error_message: z.string().optional().describe("Error message if task failed"),
+  error_doc_url: z.string().optional().describe("Link to the resolution guide for error_code")
 });

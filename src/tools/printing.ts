@@ -19,7 +19,8 @@ import {
   AnalyzePrintabilityInputSchema,
   RepairPrintabilityInputSchema,
   ProcessMulticolorInputSchema,
-  validateExactlyOneSource
+  printSource,
+  MISSING_PRINT_SOURCE
 } from "../schemas/printing.js";
 import { ResponseFormat, SlicerType } from "../constants.js";
 import {
@@ -219,7 +220,7 @@ ${launchCmd}
 
 This is the authoritative way to answer "is this model printable / suitable for 3D printing / ready to print?". Printability here means geometry validity — watertightness, manifold edges, holes, degenerate faces, and volume — measured by this check. It's free, so run it whenever printability is the question, then use the result to decide whether the mesh needs repair (\`meshy_repair_printability\`).
 
-Provide EXACTLY ONE of:
+Provide ONE of (input_task_id wins if both are given):
   - input_task_id: a SUCCEEDED Meshy task. **Must use Meshy 6 or newer** (Meshy 7 / 7.1 included). Supported task types: text-to-3d, image-to-3d, multi-image-to-3d, remesh, retexture.
   - model_url: a public URL of a 3D model file (.glb / .gltf / .obj / .fbx / .stl, max 100 MB).
 
@@ -252,17 +253,15 @@ Examples:
       }
     },
     async (params: z.infer<typeof AnalyzePrintabilityInputSchema>) => {
-      const validationError = validateExactlyOneSource(params);
-      if (validationError) {
+      const source = printSource(params);
+      if (!source) {
         return {
           isError: true,
-          content: [{ type: "text", text: validationError }]
+          content: [{ type: "text", text: MISSING_PRINT_SOURCE }]
         };
       }
       try {
-        const request: AnalyzePrintabilityApiRequest = {};
-        if (params.input_task_id) request.input_task_id = params.input_task_id;
-        if (params.model_url) request.model_url = params.model_url;
+        const request: AnalyzePrintabilityApiRequest = { ...source };
 
         const response = await client.post<CreateTaskApiResponse>(
           "/openapi/v1/print/analyze",
@@ -309,7 +308,7 @@ Output format mirrors the input format:
   - model_url with .glb → output is GLB
   - model_url with .fbx / .gltf → output is FBX / GLTF
 
-Provide EXACTLY ONE of:
+Provide ONE of (input_task_id wins if both are given):
   - input_task_id: a SUCCEEDED Meshy task that produced a GLB asset.
   - model_url: a public URL of a 3D model (.glb / .gltf / .obj / .fbx / .stl, max 100 MB; .fbx must be https, not a data: URI).
 
@@ -338,17 +337,15 @@ Examples:
       }
     },
     async (params: z.infer<typeof RepairPrintabilityInputSchema>) => {
-      const validationError = validateExactlyOneSource(params);
-      if (validationError) {
+      const source = printSource(params);
+      if (!source) {
         return {
           isError: true,
-          content: [{ type: "text", text: validationError }]
+          content: [{ type: "text", text: MISSING_PRINT_SOURCE }]
         };
       }
       try {
-        const request: RepairPrintabilityApiRequest = {};
-        if (params.input_task_id) request.input_task_id = params.input_task_id;
-        if (params.model_url) request.model_url = params.model_url;
+        const request: RepairPrintabilityApiRequest = { ...source };
 
         const response = await client.post<CreateTaskApiResponse>(
           "/openapi/v1/print/repair",
@@ -398,11 +395,11 @@ IMPORTANT: Before calling, ask the user to confirm:
   - max_colors: depends on their printer's multi-color capability (e.g. Bambu AMS supports 4-16 colors).
   - max_depth: affects color boundary precision and file size. Higher = finer but larger.
 
-Provide EXACTLY ONE of input_task_id / model_url.
+Provide input_task_id or model_url (input_task_id wins if both are given).
 
 Args:
-  - input_task_id (string, optional): Task ID of a completed TEXTURED model. Mutually exclusive with model_url.
-  - model_url (string, optional): Public URL or data URI of a textured .glb or .fbx model. Mutually exclusive with input_task_id.
+  - input_task_id (string, optional): Task ID of a completed TEXTURED model. Takes priority over model_url.
+  - model_url (string, optional): Public URL or data URI of a textured .glb or .fbx model.
   - max_colors (number): Max colors for segmentation (1-16, default: 4). MUST confirm with user based on their printer capability.
   - max_depth (number): Segmentation depth (3-6, default: 4). Higher = finer separation, larger file. MUST confirm with user.
   - response_format (enum): "markdown" or "json" (default: "markdown")
@@ -429,20 +426,19 @@ Examples:
       }
     },
     async (params: z.infer<typeof ProcessMulticolorInputSchema>) => {
-      const validationError = validateExactlyOneSource(params);
-      if (validationError) {
+      const source = printSource(params);
+      if (!source) {
         return {
           isError: true,
-          content: [{ type: "text", text: validationError }]
+          content: [{ type: "text", text: MISSING_PRINT_SOURCE }]
         };
       }
       try {
         const request: MultiColorPrintApiRequest = {
+          ...source,
           max_colors: params.max_colors,
           max_depth: params.max_depth
         };
-        if (params.input_task_id) request.input_task_id = params.input_task_id;
-        if (params.model_url) request.model_url = params.model_url;
 
         const response = await client.post<CreateTaskApiResponse>(
           "/openapi/v1/print/multi-color",

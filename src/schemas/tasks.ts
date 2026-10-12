@@ -20,7 +20,7 @@ export const GetTaskStatusInputSchema = z.object({
     .min(10, "Timeout must be at least 10 seconds")
     .max(POLL_MAX_TIMEOUT / 1000, `Timeout cannot exceed ${POLL_MAX_TIMEOUT / 1000} seconds`)
     .default(300)
-    .describe("Maximum wait time in seconds when wait=true (default: 300, max: 300)"),
+    .describe("Maximum wait for this call in seconds when wait=true (default: 300, max: 300). The task keeps running after a timeout; call again to keep waiting."),
   response_format: ResponseFormatSchema
 }).strict();
 

@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { AxiosError } from "axios";
 import { retryDelayMs, handleMeshyError } from "../dist/services/error-handler.js";
-import { getTaskWithAutoInference } from "../dist/services/meshy-client.js";
+import { getTaskWithAutoInference, pollTask } from "../dist/services/meshy-client.js";
+import { describeTaskError } from "../dist/utils/response-formatter.js";
 
 // Offline checks for the retry policy, task lookup, error messages and polling.
 
@@ -98,4 +99,54 @@ test("a task only its own route serves is still found, and real errors are not s
   await assert.rejects(getTaskWithAutoInference(fakeClient({}), "missing"), /not found on any endpoint/);
   const failing = { async get() { throw httpError("get", 503, "down"); } };
   await assert.rejects(getTaskWithAutoInference(failing, "x"), (e) => e.response?.status === 503);
+});
+
+test("402, 409 and task errors carry the server's message and the next step", () => {
+  assert.match(handleMeshyError(httpError("post", 402, "Insufficient funds")), /Insufficient funds.*meshy_check_balance/);
+  const busy = "Task is IN_PROGRESS and cannot be deleted. Credits for a task the worker has already started are not refundable";
+  assert.match(handleMeshyError(httpError("delete", 409, busy)), /Conflict \(409\)\. Task is IN_PROGRESS.*SUCCEEDED, FAILED or CANCELED/);
+  assert.equal(
+    describeTaskError({ type: "invalid_input", code: "image_too_complex", message: "Too complex.", doc_url: "https://docs.meshy.ai/x" }),
+    "[invalid_input/image_too_complex] Too complex. (guide: https://docs.meshy.ai/x)",
+  );
+  assert.equal(describeTaskError({ type: "server_error", message: "Retry." }), "[server_error] Retry.");
+});
+
+test("a failed status check is retried at the next poll, at the API's suggested interval", async () => {
+  const states = [
+    httpError("get", 503, "down"),
+    { data: { id: "t", type: "remesh", status: "IN_PROGRESS", progress: 50 }, retryAfterMs: 2000 },
+    networkError("get", "ECONNABORTED"),
+    { data: { id: "t", type: "remesh", status: "SUCCEEDED", progress: 100 } },
+  ];
+  const client = {
+    async get(path) {
+      assert.equal(path, "/openapi/v1/remesh/t");
+      return { id: "t", type: "remesh", status: "PENDING", progress: 0 };
+    },
+    async getWithRetryAfter() {
+      const next = states.shift();
+      if (next instanceof Error) throw next;
+      return next;
+    },
+  };
+  const waits = [];
+  const seen = [];
+  const result = await pollTask(client, "t", "remesh", 600000, (task) => seen.push(task.status), async (ms) => waits.push(ms));
+  assert.equal(result.task.status, "SUCCEEDED");
+  assert.equal(result.taskType, "remesh");
+  assert.deepEqual(seen, ["PENDING", "IN_PROGRESS", "SUCCEEDED"]);
+  // Backoff, backoff after the 503, the API's 2s hint, then backoff after the timeout.
+  assert.deepEqual(waits, [5000, 7500, 2000, 11250]);
+});
+
+test("polling stops at the wait budget without failing the task, and stops on real errors", async () => {
+  const pending = { id: "t", type: "remesh", status: "PENDING" };
+  const slow = { async get() { return pending; }, async getWithRetryAfter() { throw httpError("get", 429, "Rate limit exceeded"); } };
+  const result = await pollTask(slow, "t", "remesh", 6000, undefined, async () => {});
+  assert.equal(result.task.status, "PENDING");
+  assert.equal(result.lastError.response.status, 429);
+
+  const gone = { async get() { return pending; }, async getWithRetryAfter() { throw httpError("get", 404, "Task not found"); } };
+  await assert.rejects(pollTask(gone, "t", "remesh", 600000, undefined, async () => {}), (e) => e.response?.status === 404);
 });

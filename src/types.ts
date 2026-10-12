@@ -21,10 +21,15 @@ export interface TextureUrlsObject {
   ao?: string;
 }
 
-// Task Error (API returns as "task_error")
+// Task Error (API returns as "task_error"; docs: errors → Task Errors)
 export interface TaskError {
+  /** invalid_input | timeout | service_unavailable | server_error */
+  type?: string;
+  /** Specific cause, e.g. image_too_complex; present when known */
   code?: string;
   message: string;
+  /** Resolution guide for `code` */
+  doc_url?: string;
 }
 
 // API response for task creation (all endpoints return this shape)
@@ -108,7 +113,6 @@ export interface MultiImageTo3DApiRequest {
   moderation: boolean;
   ai_model?: string;
   geometry_resolution?: "standard" | "2k";
-  model_type?: string;
   pose_mode?: string;
   topology?: string;
   target_polycount?: number;

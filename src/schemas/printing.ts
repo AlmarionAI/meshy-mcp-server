@@ -35,8 +35,7 @@ export const SendToSlicerInputSchema = z.object({
 /**
  * Analyze-printability input schema — POST /openapi/v1/print/analyze. FREE.
  *
- * Provide exactly one of input_task_id / model_url. Validation happens at the
- * handler level so the exported schema stays a plain ZodObject.
+ * Provide input_task_id or model_url; input_task_id wins when both are given.
  *
  * input_task_id constraints: must be a SUCCEEDED task that used Meshy 6 or
  * newer (including Meshy 7 / 7.1). Supported task types: image-to-3d, multi-image-to-3d,
@@ -44,9 +43,9 @@ export const SendToSlicerInputSchema = z.object({
  */
 export const AnalyzePrintabilityInputSchema = z.object({
   input_task_id: TaskIdSchema.optional()
-    .describe("ID of a SUCCEEDED upstream task to analyze (must use Meshy 6 or newer, including Meshy 7 / 7.1). Mutually exclusive with model_url."),
+    .describe("ID of a SUCCEEDED upstream task to analyze (must use Meshy 6 or newer, including Meshy 7 / 7.1). Takes priority over model_url when both are given."),
   model_url: UrlSchema.optional()
-    .describe("Public URL of a 3D model to analyze (.glb / .gltf / .obj / .fbx / .stl, max 100 MB). Mutually exclusive with input_task_id."),
+    .describe("Public URL of a 3D model to analyze (.glb / .gltf / .obj / .fbx / .stl, max 100 MB). Ignored when input_task_id is given."),
   response_format: ResponseFormatSchema
 }).strict();
 
@@ -56,9 +55,9 @@ export const AnalyzePrintabilityInputSchema = z.object({
  */
 export const RepairPrintabilityInputSchema = z.object({
   input_task_id: TaskIdSchema.optional()
-    .describe("ID of a SUCCEEDED upstream task with a GLB asset. Output will be GLB. Mutually exclusive with model_url."),
+    .describe("ID of a SUCCEEDED upstream task with a GLB asset. Output will be GLB. Takes priority over model_url when both are given."),
   model_url: UrlSchema.optional()
-    .describe("Public URL of a 3D model to repair (.glb / .stl / .obj / .fbx / .gltf, max 100 MB). Output matches the input format (.glb/.stl/.obj/.fbx/.gltf). .fbx must be an https URL — it cannot be passed as a data: URI. Mutually exclusive with input_task_id."),
+    .describe("Public URL of a 3D model to repair (.glb / .stl / .obj / .fbx / .gltf, max 100 MB). Output matches the input format (.glb/.stl/.obj/.fbx/.gltf). .fbx must be an https URL — it cannot be passed as a data: URI. Ignored when input_task_id is given."),
   response_format: ResponseFormatSchema
 }).strict();
 
@@ -68,9 +67,9 @@ export const RepairPrintabilityInputSchema = z.object({
  */
 export const ProcessMulticolorInputSchema = z.object({
   input_task_id: TaskIdSchema.optional()
-    .describe("ID of a SUCCEEDED textured task. Run meshy_text_to_3d_refine or meshy_retexture first if needed. Mutually exclusive with model_url."),
+    .describe("ID of a SUCCEEDED textured task. Run meshy_text_to_3d_refine or meshy_retexture first if needed. Takes priority over model_url when both are given."),
   model_url: UrlSchema.optional()
-    .describe("Public URL of a textured 3D model (.glb / .fbx). Mutually exclusive with input_task_id."),
+    .describe("Public URL of a textured 3D model (.glb / .fbx). Ignored when input_task_id is given."),
   max_colors: z.number()
     .int()
     .min(1, "Minimum 1 color")
@@ -87,16 +86,15 @@ export const ProcessMulticolorInputSchema = z.object({
 }).strict();
 
 /**
- * Runtime check: exactly one of input_task_id / model_url must be present.
- * Returns null if valid, or an error message if not.
+ * The model source to send: input_task_id when given (the API ignores model_url
+ * then, so it is not sent), else model_url. Null when neither is given.
  */
-export function validateExactlyOneSource(
+export function printSource(
   params: { input_task_id?: string; model_url?: string }
-): string | null {
-  const hasTaskId = Boolean(params.input_task_id);
-  const hasUrl = Boolean(params.model_url);
-  if (hasTaskId === hasUrl) {
-    return "Provide exactly one of input_task_id or model_url";
-  }
+): { input_task_id: string } | { model_url: string } | null {
+  if (params.input_task_id) return { input_task_id: params.input_task_id };
+  if (params.model_url) return { model_url: params.model_url };
   return null;
 }
+
+export const MISSING_PRINT_SOURCE = "Error: provide input_task_id or model_url.";

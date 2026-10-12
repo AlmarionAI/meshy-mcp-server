@@ -11,7 +11,7 @@
 
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { MeshyClient } from "../services/meshy-client.js";
+import { MeshyClient, pollTask } from "../services/meshy-client.js";
 import { handleMeshyError } from "../services/error-handler.js";
 import { resolveImageSource } from "../services/file-utils.js";
 import { CreativeLabInputSchema } from "../schemas/creative-lab.js";
@@ -21,63 +21,20 @@ import {
   CreativeLabProduct,
   creativeLabCredits,
   CREATIVE_LAB_KEYCAP_PROTOTYPE_CREDITS,
-  POLL_INITIAL_DELAY,
-  POLL_MAX_DELAY,
-  POLL_BACKOFF_FACTOR,
-  POLL_FINALIZATION_DELAY
+  TaskType
 } from "../constants.js";
 import {
   CreateTaskApiResponse,
   CreativeLabPrototypeApiRequest,
-  CreativeLabBuildApiRequest,
-  GetTaskResponse
+  CreativeLabBuildApiRequest
 } from "../types.js";
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
+import { describeTaskError } from "../utils/response-formatter.js";
 
 /** Text progress bar (no trailing % — the MCP client appends the percentage itself). */
 function progressBar(pct: number, width = 20): string {
   const clamped = Math.max(0, Math.min(100, Math.round(pct)));
   const filled = Math.round((clamped / 100) * width);
   return `[${"█".repeat(filled)}${"░".repeat(width - filled)}]`;
-}
-
-/**
- * Poll a Creative Lab stage (prototype or build) until terminal or timeout.
- * Returns the last task object seen (caller checks status).
- */
-async function pollStage(
-  client: MeshyClient,
-  basePath: string,
-  taskId: string,
-  timeoutMs: number,
-  onPoll: (status: string, progress: number) => void
-): Promise<GetTaskResponse> {
-  const start = Date.now();
-  let delay = POLL_INITIAL_DELAY;
-  let task = await client.get<GetTaskResponse>(`${basePath}/${taskId}`);
-  while (true) {
-    const progress = task.progress || 0;
-    onPoll(task.status, progress);
-    if (
-      task.status === TaskStatus.SUCCEEDED ||
-      task.status === TaskStatus.FAILED ||
-      task.status === TaskStatus.CANCELED
-    ) {
-      return task;
-    }
-    const wait = progress >= 95 ? POLL_FINALIZATION_DELAY : delay;
-    if (Date.now() - start + wait > timeoutMs) {
-      return task; // timed out — return last (non-terminal) state
-    }
-    await sleep(wait);
-    if (progress < 95) {
-      delay = Math.min(delay * POLL_BACKOFF_FACTOR, POLL_MAX_DELAY);
-    }
-    task = await client.get<GetTaskResponse>(`${basePath}/${taskId}`);
-  }
 }
 
 /**
@@ -133,6 +90,10 @@ If the prototype stage fails, the build is NOT started (only the prototype is ch
       }
     },
     async (params: z.infer<typeof CreativeLabInputSchema>, extra) => {
+      // Kept outside the try so an error after a create still names the task
+      // that was created (and charged).
+      let protoId: string | undefined;
+      let buildId: string | undefined;
       try {
         const hasImage = Boolean(params.image_url || params.file_path);
         if (!hasImage) {
@@ -188,18 +149,22 @@ If the prototype stage fails, the build is NOT started (only the prototype is ch
           protoBase,
           protoReq as unknown as Record<string, unknown>
         );
-        const protoId = protoResp.result;
-        const proto = await pollStage(client, protoBase, protoId, timeoutMs, (s, p) => notify("prototype", s, p));
+        protoId = protoResp.result;
+        const protoPoll = await pollTask(client, protoId, `creative-lab-${product}-prototype` as TaskType, timeoutMs,
+          t => notify("prototype", t.status, t.progress || 0));
+        const proto = protoPoll.task;
 
-        if (proto.status !== TaskStatus.SUCCEEDED) {
-          const reason = proto.status === TaskStatus.FAILED
-            ? `failed: ${proto.task_error?.message || "unknown error"}`
-            : `did not finish in ${params.timeout_seconds}s (status ${proto.status})`;
+        if (proto?.status !== TaskStatus.SUCCEEDED) {
+          const reason = proto?.status === TaskStatus.FAILED
+            ? `failed: ${describeTaskError(proto.task_error)}. Failed tasks are refunded`
+            : proto?.status === TaskStatus.CANCELED
+              ? "was canceled"
+              : `did not finish in ${params.timeout_seconds}s (status ${proto?.status ?? "unknown"}). It is still running; check it with meshy_get_task_status`;
           return {
             isError: true,
             content: [{
               type: "text",
-              text: `Error: Creative Lab ${product} prototype ${reason}. The build stage was NOT started, so only the ${credits.prototype}-credit prototype was charged. Prototype task_id: ${protoId}.`
+              text: `Error: Creative Lab ${product} prototype ${reason}. The build stage was NOT started (the prototype costs ${credits.prototype} credits). Prototype task_id: ${protoId} (task_type "creative-lab-${product}-prototype").`
             }]
           };
         }
@@ -234,18 +199,22 @@ If the prototype stage fails, the build is NOT started (only the prototype is ch
           buildBase,
           buildReq as unknown as Record<string, unknown>
         );
-        const buildId = buildResp.result;
-        const build = await pollStage(client, buildBase, buildId, timeoutMs, (s, p) => notify("build", s, p));
+        buildId = buildResp.result;
+        const buildPoll = await pollTask(client, buildId, `creative-lab-${product}-build` as TaskType, timeoutMs,
+          t => notify("build", t.status, t.progress || 0));
+        const build = buildPoll.task;
 
-        if (build.status !== TaskStatus.SUCCEEDED) {
-          const reason = build.status === TaskStatus.FAILED
-            ? `failed: ${build.task_error?.message || "unknown error"}`
-            : `did not finish in ${params.timeout_seconds}s (status ${build.status})`;
+        if (build?.status !== TaskStatus.SUCCEEDED) {
+          const reason = build?.status === TaskStatus.FAILED
+            ? `failed: ${describeTaskError(build.task_error)}`
+            : build?.status === TaskStatus.CANCELED
+              ? "was canceled"
+              : `did not finish in ${params.timeout_seconds}s (status ${build?.status ?? "unknown"}). It is still running`;
           return {
             isError: true,
             content: [{
               type: "text",
-              text: `Error: Creative Lab ${product} build ${reason}. Build task_id: ${buildId} (task_type "creative-lab-${product}-build" — you can poll it with meshy_get_task_status).`
+              text: `Error: Creative Lab ${product} build ${reason}. Build task_id: ${buildId} (task_type "creative-lab-${product}-build" — check it with meshy_get_task_status). Prototype task_id: ${protoId}.`
             }]
           };
         }
@@ -283,9 +252,16 @@ The final 3D ${product} is ready. Download it with \`meshy_download_model\` (tas
           structuredContent: output
         };
       } catch (error) {
+        const created = [
+          protoId && `Prototype task_id: ${protoId} (task_type "creative-lab-${params.product}-prototype")`,
+          buildId && `Build task_id: ${buildId} (task_type "creative-lab-${params.product}-build")`
+        ].filter(Boolean);
+        const note = created.length
+          ? `\n\nAlready created (check with meshy_get_task_status before starting over): ${created.join("; ")}.`
+          : "";
         return {
           isError: true,
-          content: [{ type: "text", text: handleMeshyError(error, { tool: "meshy_creative_lab" }) }]
+          content: [{ type: "text", text: handleMeshyError(error, { tool: "meshy_creative_lab" }) + note }]
         };
       }
     }

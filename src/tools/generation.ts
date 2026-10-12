@@ -444,7 +444,7 @@ Other Args:
   - ai_model: "latest" (default, = Meshy 7.1) / "meshy-7.1" / "meshy-6" (20 mesh, 30 textured), "meshy-6-lite" (5 / 15, 2K textures only). "meshy-7" is deprecated. Smart Topology is unavailable here. Ask the user which model and confirm the cost first
   - geometry_resolution: "standard" (default) or "2k" Ultra pass (+5 credits) on Meshy 7.1/latest. No 4k here
   - ultra_mode: deprecated compatibility alias for the 2k pass; confirm higher-detail cost
-  - model_type: "standard" or "lowpoly", pose_mode, topology, target_polycount, should_remesh, symmetry_mode
+  - pose_mode, topology, target_polycount, should_remesh, symmetry_mode (there is no model_type here)
   - should_texture: Whether to generate textures (default true)
   - enable_pbr: PBR maps (default false)
   - texture_prompt, texture_image_url: Guide texturing
@@ -482,7 +482,6 @@ Error Handling:
           enable_pbr: params.enable_pbr,
           moderation: false,
           ai_model: options.ai_model,
-          model_type: options.model_type,
         };
         if (options.geometry_resolution !== undefined) {
           request.geometry_resolution = options.geometry_resolution as

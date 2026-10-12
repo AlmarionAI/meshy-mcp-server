@@ -2,10 +2,23 @@
  * Meshy API client with authentication and error handling
  */
 
-import axios, { AxiosError, AxiosInstance, AxiosRequestConfig } from "axios";
-import { API_BASE_URL, API_TIMEOUT, API_CREATE_TIMEOUT, MAX_RETRIES, TaskType } from "../constants.js";
+import axios, { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
+import {
+  API_BASE_URL,
+  API_TIMEOUT,
+  API_CREATE_TIMEOUT,
+  MAX_RETRIES,
+  POLL_BACKOFF_FACTOR,
+  POLL_FINALIZATION_DELAY,
+  POLL_INITIAL_DELAY,
+  POLL_MAX_DELAY,
+  TaskStatus,
+  TaskType
+} from "../constants.js";
 import {
   retryDelayMs,
+  isTransientError,
+  parseRetryAfterMs,
   MeshyAuthError,
   MISSING_API_KEY_MESSAGE,
   INVALID_API_KEY_MESSAGE
@@ -46,11 +59,20 @@ export class MeshyClient {
    * Make a GET request with retry logic
    */
   async get<T>(endpoint: string, params?: Record<string, unknown>): Promise<T> {
-    return this.requestWithRetry<T>({
+    return (await this.requestWithRetry<T>({
       method: "GET",
       url: endpoint,
       params
-    });
+    })).data;
+  }
+
+  /**
+   * GET that also returns the Retry-After poll hint (ms) the API sends while a
+   * task is unfinished.
+   */
+  async getWithRetryAfter<T>(endpoint: string): Promise<{ data: T; retryAfterMs?: number }> {
+    const response = await this.requestWithRetry<T>({ method: "GET", url: endpoint });
+    return { data: response.data, retryAfterMs: parseRetryAfterMs(response.headers?.["retry-after"]) };
   }
 
   /**
@@ -58,28 +80,28 @@ export class MeshyClient {
    * or 5xx (see retryDelayMs), so they get the longer timeout the docs advise.
    */
   async post<T>(endpoint: string, data?: Record<string, unknown>): Promise<T> {
-    return this.requestWithRetry<T>({
+    return (await this.requestWithRetry<T>({
       method: "POST",
       url: endpoint,
       data,
       timeout: API_CREATE_TIMEOUT
-    });
+    })).data;
   }
 
   /**
    * Make a DELETE request with retry logic
    */
   async delete<T>(endpoint: string): Promise<T> {
-    return this.requestWithRetry<T>({
+    return (await this.requestWithRetry<T>({
       method: "DELETE",
       url: endpoint
-    });
+    })).data;
   }
 
   /**
    * Send a request, retrying as retryDelayMs allows for its method
    */
-  private async requestWithRetry<T>(config: AxiosRequestConfig): Promise<T> {
+  private async requestWithRetry<T>(config: AxiosRequestConfig): Promise<AxiosResponse<T>> {
     if (!this.apiKey) {
       throw new MeshyAuthError(MISSING_API_KEY_MESSAGE);
     }
@@ -89,8 +111,7 @@ export class MeshyClient {
 
     for (let attempt = 0; ; attempt++) {
       try {
-        const response = await this.client.request<T>(config);
-        return response.data;
+        return await this.client.request<T>(config);
       } catch (error) {
         if (error instanceof AxiosError && error.response?.status === 401) {
           this.keyRejected = true;
@@ -171,6 +192,69 @@ export async function getTaskWithAutoInference(
   }
 
   throw new Error(`Task ${taskId} not found on any endpoint. Verify the task_id is correct.`);
+}
+
+const FINAL_STATUSES = new Set<string>([TaskStatus.SUCCEEDED, TaskStatus.FAILED, TaskStatus.CANCELED]);
+
+export interface PollResult {
+  /** Last task state read; undefined if no status check succeeded */
+  task?: GetTaskResponse;
+  taskType?: TaskType;
+  polls: number;
+  /** The last status check's error, when it failed (the task keeps running) */
+  lastError?: unknown;
+}
+
+/**
+ * Poll a task until it is SUCCEEDED, FAILED or CANCELED, or timeoutMs passes.
+ *
+ * A failed status check (timeout, 429, 5xx) is retried at the next poll: it
+ * does not mean the task failed (docs: task-lifecycle, "How Long to Wait").
+ * Between polls it waits the API's Retry-After hint when one is sent, else a
+ * backoff from 5s to 30s (15s from 95% progress). The first poll resolves the
+ * task's route and type (getTaskWithAutoInference).
+ */
+export async function pollTask(
+  client: MeshyClient,
+  taskId: string,
+  taskType: TaskType | undefined,
+  timeoutMs: number,
+  onPoll: (task: GetTaskResponse, polls: number) => void | Promise<void> = () => {},
+  sleep: (ms: number) => Promise<void> = ms => new Promise(resolve => setTimeout(resolve, ms))
+): Promise<PollResult> {
+  const start = Date.now();
+  let backoff = POLL_INITIAL_DELAY;
+  let resolved: ResolvedTask | undefined;
+  let task: GetTaskResponse | undefined;
+
+  for (let polls = 1; ; polls++) {
+    let hint: number | undefined;
+    let lastError: unknown;
+    try {
+      if (!resolved) {
+        resolved = await getTaskWithAutoInference(client, taskId, taskType);
+        task = resolved.task;
+      } else {
+        const read = await client.getWithRetryAfter<GetTaskResponse>(`${resolved.endpoint}/${taskId}`);
+        task = read.data;
+        hint = read.retryAfterMs;
+      }
+      await onPoll(task, polls);
+      if (FINAL_STATUSES.has(task.status)) return { task, taskType: resolved.taskType, polls };
+    } catch (error) {
+      if (!isTransientError(error)) throw error;
+      lastError = error;
+      console.error(`Status check ${polls} for task ${taskId} failed; retrying at the next poll`);
+    }
+
+    const progress = task?.progress ?? 0;
+    const wait = hint ?? (progress >= 95 ? POLL_FINALIZATION_DELAY : backoff);
+    if (Date.now() - start + wait > timeoutMs) {
+      return { task, taskType: resolved?.taskType, polls, lastError };
+    }
+    await sleep(wait);
+    if (hint === undefined && progress < 95) backoff = Math.min(backoff * POLL_BACKOFF_FACTOR, POLL_MAX_DELAY);
+  }
 }
 
 /**

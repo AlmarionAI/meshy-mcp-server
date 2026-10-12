@@ -234,9 +234,6 @@ export const MultiImageTo3DInputSchema = z.object({
   geometry_resolution: z.enum(["standard", "2k"]).optional()
     .describe("Meshy 7.1 geometry pass: standard (default) or 2k (Ultra, +5 credits). 4k is not available on multi-image. Needs meshy-7.1/latest. Confirm the surcharge first."),
   ultra_mode: deprecatedUltraMode(),
-  model_type: z.enum([ModelType.STANDARD, ModelType.LOWPOLY])
-    .optional()
-    .describe("Model type: standard or deprecated lowpoly. Smart Topology is unavailable on multi-image generation."),
   pose_mode: z.nativeEnum(PoseMode)
     .optional()
     .describe("Pose mode for character models: 'a-pose' or 't-pose'. IMPORTANT: When the user intends to rig or animate the model, default to 't-pose' for best rigging results"),

@@ -7,7 +7,7 @@ import axios from "axios";
 import * as fs from "fs";
 import * as path from "path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { MeshyClient, getTaskWithAutoInference } from "../services/meshy-client.js";
+import { MeshyClient, getTaskWithAutoInference, pollTask } from "../services/meshy-client.js";
 import { handleMeshyError } from "../services/error-handler.js";
 import {
   GetTaskStatusInputSchema,
@@ -20,14 +20,11 @@ import {
   ResponseFormat,
   TaskStatus,
   TaskType,
-  CHARACTER_LIMIT,
-  POLL_INITIAL_DELAY,
-  POLL_MAX_DELAY,
-  POLL_BACKOFF_FACTOR,
-  POLL_FINALIZATION_DELAY
+  CHARACTER_LIMIT
 } from "../constants.js";
 import { Task, GetTaskResponse, TextureUrlsObject } from "../types.js";
 import { getTaskEndpoint, LIST_CAPABLE_TASK_TYPES } from "../utils/endpoints.js";
+import { describeTaskError } from "../utils/response-formatter.js";
 import {
   resolveProjectDir,
   getFilePath,
@@ -132,10 +129,6 @@ async function downloadFileToLocal(url: string, saveTo: string): Promise<number>
   });
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
 /**
  * Render a progress bar
  */
@@ -220,8 +213,7 @@ function formatTask(task: Task, format: ResponseFormat): string {
       lines.push("**TIP**: Use `meshy_get_task_status` with wait=true (default) to auto-wait until completion.");
     } else if (task.status === TaskStatus.FAILED && task.task_error) {
       lines.push(`## Error`);
-      if (task.task_error.code) lines.push(`**Code**: ${task.task_error.code}`);
-      lines.push(`**Message**: ${task.task_error.message}`);
+      lines.push(describeTaskError(task.task_error));
     }
 
     return lines.join("\n");
@@ -376,7 +368,7 @@ export function registerTaskTools(server: McpServer, client: MeshyClient) {
       title: "Get Task Status",
       description: `Check task status or wait for completion. Supports two modes:
 
-**wait=true (default)**: Auto-polls with exponential backoff (5s→30s, 15s at 95%+) until SUCCEEDED/FAILED/TIMEOUT. Returns full result with progress bar. Recommended — call once and get the final result.
+**wait=true (default)**: Polls until SUCCEEDED / FAILED / CANCELED or timeout_seconds runs out, at the API's suggested interval (else 5s→30s backoff). A failed status check (timeout, 429, 5xx) is retried at the next poll. Running out of time returns outcome "TIMEOUT": the task keeps running on Meshy — call again with the same task_id to keep waiting (Meshy advises allowing up to 60 minutes from creation).
 
 **wait=false**: Returns current status immediately (single query) with progress bar.
 
@@ -384,7 +376,7 @@ Args:
   - task_id (string): Task ID returned from generation tools (required)
   - task_type (enum, optional): Task type for endpoint routing. If omitted or wrong, the server finds the task and reports its actual type.
   - wait (boolean): Auto-wait until completion (default: true)
-  - timeout_seconds (number): Max wait time when wait=true (default: 300, max: 300)
+  - timeout_seconds (number): Max wait for this call when wait=true (default: 300, max: 300); call again to wait longer
   - response_format (enum): "markdown" or "json" (default: "markdown")
 
 Returns (wait=true, SUCCEEDED):
@@ -432,8 +424,10 @@ Examples:
               vertex_count: task.vertex_count,
               face_count: task.face_count,
               consumed_credits: task.consumed_credits,
+              error_type: task.task_error?.type,
               error_code: task.task_error?.code,
-              error_message: task.task_error?.message
+              error_message: task.task_error?.message,
+              error_doc_url: task.task_error?.doc_url
             }
           };
         } catch (error) {
@@ -445,164 +439,136 @@ Examples:
       }
 
       // --- wait=true: polling mode ---
-      const timeoutMs = params.timeout_seconds * 1000;
       const startTime = Date.now();
-      let pollCount = 0;
-      let currentDelay = POLL_INITIAL_DELAY;
-      let resolvedEndpoint = "";
-      let resolvedType = TaskType.TEXT_TO_3D;
+      const elapsed = () => Math.round((Date.now() - startTime) / 1000);
+      const stillRunning =
+        "The task keeps running on Meshy: stopping the wait does not cancel it. Call `meshy_get_task_status` " +
+        "again with the same task_id to keep waiting. Meshy advises waiting at least 60 minutes from the task's " +
+        "creation before giving up; most tasks finish in a few minutes.";
 
       try {
-        while (true) {
-          pollCount++;
-          let task: GetTaskResponse;
-
-          // First poll: use auto-inference to resolve the correct endpoint
-          if (pollCount === 1) {
-            const result = await getTaskWithAutoInference(client, params.task_id, params.task_type);
-            task = result.task;
-            resolvedEndpoint = result.endpoint;
-            resolvedType = result.taskType;
-          } else {
-            task = await client.get<GetTaskResponse>(`${resolvedEndpoint}/${params.task_id}`);
-          }
-
+        const result = await pollTask(client, params.task_id, params.task_type, params.timeout_seconds * 1000, async (task, polls) => {
           const progress = task.progress || 0;
-
-          // Send progress notification via logging (primary channel)
           try {
             server.sendLoggingMessage({
               level: "info",
-              data: `${renderProgressBar(progress)} — ${task.status} (poll #${pollCount})`
+              data: `${renderProgressBar(progress)} — ${task.status} (poll #${polls})`
             });
           } catch {
             // Logging not critical
           }
-
-          // Send structured progress notification (enhanced channel for clients that support it)
           if (extra._meta?.progressToken !== undefined) {
             try {
               await server.server.notification({
                 method: "notifications/progress",
                 params: {
                   progressToken: extra._meta.progressToken,
-                  progress: progress,
+                  progress,
                   total: 100,
                   message: `${task.status} - ${renderProgressBar(progress, 20, false)}`
                 }
               });
             } catch {
-              // Client may not support progress notifications, silently ignore
+              // Client may not support progress notifications
             }
           }
+        });
+        const { task, polls } = result;
+        const waitTimeSec = elapsed();
+        const progress = task?.progress || 0;
 
-          // Terminal: SUCCEEDED
-          if (task.status === TaskStatus.SUCCEEDED) {
-            const waitTimeSec = Math.round((Date.now() - startTime) / 1000);
-            return buildWaitSuccessResponse(task, params.task_id, resolvedType, waitTimeSec, pollCount);
-          }
+        if (task?.status === TaskStatus.SUCCEEDED) {
+          return buildWaitSuccessResponse(task, params.task_id, result.taskType ?? TaskType.TEXT_TO_3D, waitTimeSec, polls);
+        }
 
-          // Terminal: FAILED
-          if (task.status === TaskStatus.FAILED) {
-            const waitTimeSec = Math.round((Date.now() - startTime) / 1000);
-            const errorMsg = task.task_error?.message || "Unknown error";
-            const errorCode = task.task_error?.code || "";
-            return {
-              isError: true,
-              content: [{
-                type: "text" as const,
-                text: `# Task Failed
+        if (task?.status === TaskStatus.FAILED) {
+          const retryHint = task.task_error?.type === "invalid_input"
+            ? "Fix the input (see the message above) before creating the task again."
+            : "Credits for a failed task are refunded. Creating it again often works; simplify the input if it keeps failing.";
+          return {
+            isError: true,
+            content: [{
+              type: "text" as const,
+              text: `# Task Failed
 
-${renderProgressBar(progress)} — FAILED (${waitTimeSec}s, ${pollCount} polls)
+${renderProgressBar(progress)} — FAILED (${waitTimeSec}s, ${polls} polls)
 
 **Task ID**: ${params.task_id}
-**Error**: ${errorCode ? `[${errorCode}] ` : ""}${errorMsg}
+**Error**: ${describeTaskError(task.task_error)}
 
-The task failed during processing. You may want to retry with different parameters.`
-              }],
-              structuredContent: {
-                outcome: "FAILED" as const,
-                task_id: params.task_id,
-                status: "FAILED",
-                progress,
-                error_code: errorCode || undefined,
-                error_message: errorMsg,
-                wait_time_seconds: waitTimeSec,
-                poll_count: pollCount
-              }
-            };
-          }
+${retryHint}`
+            }],
+            structuredContent: {
+              outcome: "FAILED" as const,
+              task_id: params.task_id,
+              task_type: result.taskType,
+              status: "FAILED",
+              progress,
+              error_type: task.task_error?.type,
+              error_code: task.task_error?.code,
+              error_message: task.task_error?.message || "Unknown error",
+              error_doc_url: task.task_error?.doc_url,
+              wait_time_seconds: waitTimeSec,
+              poll_count: polls
+            }
+          };
+        }
 
-          // Terminal: CANCELED
-          if (task.status === TaskStatus.CANCELED) {
-            const waitTimeSec = Math.round((Date.now() - startTime) / 1000);
-            return {
-              content: [{
-                type: "text" as const,
-                text: `# Task Canceled
+        if (task?.status === TaskStatus.CANCELED) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: `# Task Canceled
 
-${renderProgressBar(progress)} — CANCELED (${waitTimeSec}s, ${pollCount} polls)
+${renderProgressBar(progress)} — CANCELED (${waitTimeSec}s, ${polls} polls)
 
 **Task ID**: ${params.task_id}`
-              }],
-              structuredContent: {
-                outcome: "CANCELED" as const,
-                task_id: params.task_id,
-                status: "CANCELED",
-                progress,
-                wait_time_seconds: waitTimeSec,
-                poll_count: pollCount
-              }
-            };
-          }
-
-          // Check timeout before sleeping
-          const elapsed = Date.now() - startTime;
-          if (elapsed + currentDelay > timeoutMs) {
-            const waitTimeSec = Math.round(elapsed / 1000);
-            return {
-              isError: true,
-              content: [{
-                type: "text" as const,
-                text: `# Task Timeout
-
-${renderProgressBar(progress)} — ${task.status} (${waitTimeSec}s, ${pollCount} polls)
-
-**Task ID**: ${params.task_id}
-**Timeout**: ${params.timeout_seconds}s exceeded
-
-The task is still processing. You can:
-1. Call \`meshy_get_task_status\` again with a longer timeout_seconds
-2. Call with wait=false to check status manually`
-              }],
-              structuredContent: {
-                outcome: "TIMEOUT" as const,
-                task_id: params.task_id,
-                status: task.status,
-                progress,
-                wait_time_seconds: waitTimeSec,
-                poll_count: pollCount
-              }
-            };
-          }
-
-          // Determine delay: fixed 15s during finalization, otherwise backoff
-          const delayToUse = progress >= 95 ? POLL_FINALIZATION_DELAY : currentDelay;
-
-          await sleep(delayToUse);
-
-          // Increase delay for next iteration (backoff)
-          if (progress < 95) {
-            currentDelay = Math.min(currentDelay * POLL_BACKOFF_FACTOR, POLL_MAX_DELAY);
-          }
+            }],
+            structuredContent: {
+              outcome: "CANCELED" as const,
+              task_id: params.task_id,
+              task_type: result.taskType,
+              status: "CANCELED",
+              progress,
+              wait_time_seconds: waitTimeSec,
+              poll_count: polls
+            }
+          };
         }
-      } catch (error) {
-        const waitTimeSec = Math.round((Date.now() - startTime) / 1000);
+
+        // Out of wait budget. The task itself is not affected.
+        const lastCheck = result.lastError
+          ? `\n**Last status check failed**: ${handleMeshyError(result.lastError)}\n`
+          : "";
         return {
           isError: true,
           content: [{
             type: "text" as const,
-            text: `${handleMeshyError(error)}\n\n**Wait Time**: ${waitTimeSec}s (${pollCount} polls)\n\nYou can retry with \`meshy_get_task_status\` or use wait=false to check manually.`
+            text: `# Still Running
+
+${renderProgressBar(progress)} — ${task?.status ?? "UNKNOWN"} (${waitTimeSec}s, ${polls} polls)
+
+**Task ID**: ${params.task_id}
+**Waited**: ${params.timeout_seconds}s (this call's limit)
+${lastCheck}
+${stillRunning}`
+          }],
+          structuredContent: {
+            outcome: "TIMEOUT" as const,
+            task_id: params.task_id,
+            task_type: result.taskType,
+            status: task?.status ?? "UNKNOWN",
+            progress,
+            wait_time_seconds: waitTimeSec,
+            poll_count: polls
+          }
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [{
+            type: "text" as const,
+            text: `${handleMeshyError(error)}\n\n**Wait Time**: ${elapsed()}s`
           }]
         };
       }

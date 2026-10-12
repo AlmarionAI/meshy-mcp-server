@@ -3,7 +3,7 @@
  */
 
 import { AxiosError } from "axios";
-import { ErrorCode, MAX_RETRIES, MAX_RETRY_AFTER_MS, RETRY_DELAYS } from "../constants.js";
+import { MAX_RETRIES, MAX_RETRY_AFTER_MS, RETRY_DELAYS } from "../constants.js";
 import { RequestValidationError } from "../utils/generation-options.js";
 
 export interface MeshyError {
@@ -58,35 +58,6 @@ export function handleMeshyError(error: unknown, context?: ErrorContext): string
     if (error.response) {
       const status = error.response.status;
       const errorData = error.response.data as any;
-      const errorCode = errorData?.error_code || errorData?.code;
-
-      // Map specific error codes
-      switch (errorCode) {
-        case ErrorCode.INSUFFICIENT_CREDITS:
-          return "Error: Insufficient credits. Use `meshy_check_balance` to check your balance. Upgrade at https://meshy.ai/pricing";
-
-        case ErrorCode.TOO_MANY_PENDING_TASKS:
-          return "Error: Too many pending tasks. Please wait for current tasks to complete or cancel some tasks.";
-
-        case ErrorCode.INVALID_MODEL_NOT_SUPPORTED:
-          return "Error: Model format not supported. Supported formats: GLB, FBX, USDZ, 3MF";
-
-        case ErrorCode.INVALID_MODEL_INVALID_FORMAT:
-          return "Error: Model file is corrupted or invalid. Please try generating again.";
-
-        case ErrorCode.LIMIT_EXCEEDED:
-          return "Error: Rate limit exceeded. Please wait a moment before making more requests.";
-
-        case ErrorCode.FORBIDDEN:
-          return "Error: Permission denied. Please check your API key has the required permissions.";
-
-        case ErrorCode.NOT_FOUND:
-          return "Error: Resource not found. Please verify the task ID is correct.";
-
-        case ErrorCode.INTERNAL_ERROR:
-          return "Error: Meshy service error. Please try again later.";
-      }
-
       const tool = context?.tool;
 
       // Handle HTTP status codes
@@ -102,8 +73,12 @@ export function handleMeshyError(error: unknown, context?: ErrorContext): string
         case 401:
           return `Error: ${INVALID_API_KEY_MESSAGE}`;
 
+        case 402:
+          return `Error: Payment required (402). ${errorData?.message || "Insufficient credits."} ` +
+            "Check the balance with `meshy_check_balance`; add credits or upgrade at https://www.meshy.ai/pricing.";
+
         case 403:
-          return "Error: Permission denied. Your API key may not have access to this resource.";
+          return `Error: Permission denied (403). ${errorData?.message || "Your API key may not have access to this resource."}`;
 
         case 404: {
           if (tool === "meshy_uv_unwrap") {
@@ -112,8 +87,13 @@ export function handleMeshyError(error: unknown, context?: ErrorContext): string
           if (tool === "meshy_creative_lab") {
             return "Error: Creative Lab resource not found. The product may not be available for your account/plan, or the task expired — verify the product and try again, or contact Meshy support.";
           }
-          return "Error: Resource not found. Please check the ID is correct.";
+          return `Error: Not found (404). ${errorData?.message || "Check that the ID is correct."}`;
         }
+
+        case 409:
+          // e.g. DELETE of a task that is already IN_PROGRESS.
+          return `Error: Conflict (409). ${errorData?.message || "The task's current state does not allow this operation."} ` +
+            "Check the task with `meshy_get_task_status` and retry once it is SUCCEEDED, FAILED or CANCELED.";
 
         case 429:
           if (isQueueFullError(error)) {
@@ -225,11 +205,25 @@ export function isQueueFullError(error: unknown): boolean {
     /^NoMore(Pending|Concurrent)Tasks/.test(responseMessage(error));
 }
 
-function retryAfterMs(error: AxiosError): number | undefined {
-  const raw = error.response?.headers?.["retry-after"];
+/** A Retry-After header value (delta-seconds, as the API sends it) in ms. */
+export function parseRetryAfterMs(raw: unknown): number | undefined {
   if (raw === undefined || raw === null || raw === "") return undefined;
   const seconds = Number(raw);
   return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : undefined;
+}
+
+function retryAfterMs(error: AxiosError): number | undefined {
+  return parseRetryAfterMs(error.response?.headers?.["retry-after"]);
+}
+
+/**
+ * A timeout, network error, 429 or 5xx. On a status check this says nothing
+ * about the task, which keeps running (docs: task-lifecycle).
+ */
+export function isTransientError(error: unknown): boolean {
+  if (!(error instanceof AxiosError)) return false;
+  const status = error.response?.status;
+  return status === undefined || status === 429 || status >= 500;
 }
 
 /** The request limiter's 429: refused before any handler ran, so nothing was created. */
@@ -259,10 +253,9 @@ function createOutcomeUnknown(error: AxiosError): boolean {
  */
 export function retryDelayMs(method: string | undefined, error: unknown, attempt: number): number | undefined {
   if (attempt >= MAX_RETRIES || !(error instanceof AxiosError)) return undefined;
-  const status = error.response?.status;
   const retryable = method?.toUpperCase() === "POST"
     ? isRequestRateLimit(error)
-    : !isQueueFullError(error) && (status === undefined || status === 429 || status >= 500);
+    : !isQueueFullError(error) && isTransientError(error);
   if (!retryable) return undefined;
   const hinted = retryAfterMs(error);
   if (hinted !== undefined) return hinted <= MAX_RETRY_AFTER_MS ? Math.max(hinted, 1000) : undefined;

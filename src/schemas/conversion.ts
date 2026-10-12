@@ -1,9 +1,8 @@
 /**
  * Zod schemas for standalone post-processing tools: convert, resize, uv-unwrap.
  *
- * All three accept exactly one of input_task_id / model_url. Validation happens at
- * the handler level (see validateExactlyOneSource in ./printing.js) so the exported
- * schema stays a plain ZodObject compatible with `inputSchema`.
+ * All three take input_task_id or model_url; input_task_id wins when both are
+ * given (see printSource in ./printing.js).
  */
 
 import { z } from "zod";
@@ -16,9 +15,9 @@ import { ResponseFormatSchema, TaskIdSchema, UrlSchema } from "./common.js";
  */
 export const ConvertInputSchema = z.object({
   input_task_id: TaskIdSchema.optional()
-    .describe("ID of a SUCCEEDED Meshy task whose model to convert. Mutually exclusive with model_url."),
+    .describe("ID of a SUCCEEDED Meshy task whose model to convert. Takes priority over model_url when both are given."),
   model_url: UrlSchema.optional()
-    .describe("Public URL or data URI of a 3D model (.glb / .gltf / .obj / .fbx / .stl). Mutually exclusive with input_task_id."),
+    .describe("Public URL or data URI of a 3D model (.glb / .gltf / .obj / .fbx / .stl). Ignored when input_task_id is given."),
   target_formats: z.array(z.nativeEnum(ConvertFormat))
     .min(1, "At least one target format is required")
     .describe("Output formats (required). Options: glb, fbx, obj, usdz, blend, stl, 3mf."),
@@ -31,9 +30,9 @@ export const ConvertInputSchema = z.object({
  */
 export const ResizeInputSchema = z.object({
   input_task_id: TaskIdSchema.optional()
-    .describe("ID of a SUCCEEDED Meshy task whose model to resize (output is GLB). Mutually exclusive with model_url."),
+    .describe("ID of a SUCCEEDED Meshy task whose model to resize (output is GLB). Takes priority over model_url when both are given."),
   model_url: UrlSchema.optional()
-    .describe("Public URL or data URI of a 3D model (.glb / .gltf / .obj / .fbx / .stl); output preserves the input format. Mutually exclusive with input_task_id."),
+    .describe("Public URL or data URI of a 3D model (.glb / .gltf / .obj / .fbx / .stl); output preserves the input format. Ignored when input_task_id is given."),
   resize_height: z.number()
     .positive()
     .optional()
@@ -57,9 +56,9 @@ export const ResizeInputSchema = z.object({
  */
 export const UvUnwrapInputSchema = z.object({
   input_task_id: TaskIdSchema.optional()
-    .describe("ID of a SUCCEEDED Meshy task that produced a GLB (≤40,000 faces). Mutually exclusive with model_url."),
+    .describe("ID of a SUCCEEDED Meshy task that produced a GLB (≤40,000 faces). Takes priority over model_url when both are given."),
   model_url: UrlSchema.optional()
-    .describe("Public URL or data URI of a .glb model (≤40,000 faces). ONLY .glb is supported — convert other formats first. Mutually exclusive with input_task_id."),
+    .describe("Public URL or data URI of a .glb model (≤40,000 faces). ONLY .glb is supported — convert other formats first. Ignored when input_task_id is given."),
   response_format: ResponseFormatSchema
 }).strict();
 

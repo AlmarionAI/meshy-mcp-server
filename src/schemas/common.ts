@@ -45,11 +45,10 @@ export const UrlSchema = z.string()
   .describe("Publicly accessible URL");
 
 /**
- * Prompt schema
+ * Prompt schema for the image endpoints, which set no length limit.
  */
 export const PromptSchema = z.string()
-  .min(2, "Prompt must be at least 2 characters")
-  .max(600, "Prompt must not exceed 600 characters")
+  .min(1, "Prompt is required")
   .describe("Text description");
 
 /**

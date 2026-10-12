@@ -32,7 +32,7 @@ Useful for creating reference images that can then be used with image-to-3d or i
 
 Args:
   - ai_model (enum): "nano-banana" (3 credits), "nano-banana-2" (6), "nano-banana-pro" (9), "gpt-image-2" / "gpt-image-2-5-flare" / "gpt-image-2-5-sunburst" (9) (required)
-  - prompt (string): Text description of the image to generate (2-600 characters, required)
+  - prompt (string): Text description of the image to generate (required)
   - generate_multi_view (boolean, optional): Generate multiple viewpoint images (default: false). Do not combine with aspect_ratio
   - pose_mode (enum, optional): Pose for character images - "a-pose" or "t-pose"
   - aspect_ratio (enum, optional): Image aspect ratio (API default: "1:1"). Options: "1:1", "16:9", "9:16", "4:3", "3:4"; "3:2" / "2:3" on GPT Image models only

@@ -279,18 +279,6 @@ export enum AnimationPostProcessOp {
   EXTRACT_ARMATURE = "extract_armature"
 }
 
-// Error Codes
-export enum ErrorCode {
-  INSUFFICIENT_CREDITS = "InsufficientCredits",
-  TOO_MANY_PENDING_TASKS = "TooManyPendingTasks",
-  INVALID_MODEL_NOT_SUPPORTED = "InvalidModel:NotSupported",
-  INVALID_MODEL_INVALID_FORMAT = "InvalidModel:InvalidFormat",
-  LIMIT_EXCEEDED = "LimitExceeded",
-  FORBIDDEN = "Forbidden",
-  NOT_FOUND = "NotFound",
-  INTERNAL_ERROR = "InternalError"
-}
-
 // Timeouts and retries (docs: task-lifecycle "How Long to Wait")
 export const API_TIMEOUT = 30000; // GET / DELETE
 export const API_CREATE_TIMEOUT = 60000; // POST: creates are slower, and a timed-out create is never resent
