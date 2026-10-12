@@ -38,9 +38,46 @@ const TASK_ENDPOINTS: Record<TaskType, string> = {
 };
 
 /**
- * All endpoint base paths in priority order for auto-inference
+ * Order in which to probe for a task of unknown type.
+ *
+ * Several GET routes are not scoped to their task type: text-to-3d, image-to-3d,
+ * multi-image-to-3d, retexture and print/repair return any of the caller's
+ * tasks, shaped for that route (a text-to-3d probe turns a rigging task into a
+ * text-to-3d one, with no rig result). getTaskWithAutoInference therefore reads
+ * the task's own `type` and re-fetches it from that type's route. Image-to-3d
+ * goes first because it answers for every task except Creative Lab and
+ * text-to-motion; text-to-3d goes last.
  */
-export const ALL_TASK_ENDPOINTS = Object.values(TASK_ENDPOINTS);
+export const PROBE_TASK_TYPES: TaskType[] = [
+  TaskType.IMAGE_TO_3D,
+  ...(Object.keys(TASK_ENDPOINTS) as TaskType[]).filter(
+    t => t !== TaskType.IMAGE_TO_3D && t !== TaskType.TEXT_TO_3D
+  ),
+  TaskType.TEXT_TO_3D
+];
+
+/**
+ * The API's own names for task types that this server spells differently. The
+ * API puts them in a task's `type` field;
+ * accepting them as task_type lets an agent pass that value straight back.
+ */
+const API_TYPE_ALIASES: Record<string, TaskType> = {
+  "text-to-3d-preview": TaskType.TEXT_TO_3D,
+  "text-to-3d-refine": TaskType.TEXT_TO_3D,
+  "rig": TaskType.RIGGING,
+  "animate": TaskType.ANIMATION,
+  "print-multi-color": TaskType.MULTI_COLOR_PRINT
+};
+
+const TASK_TYPE_VALUES = new Set<string>(Object.values(TaskType));
+
+/** This server's TaskType for a task_type input or an API `type` value, or undefined. */
+export function toTaskType(value: unknown): TaskType | undefined {
+  if (typeof value !== "string") return undefined;
+  const key = value.trim().toLowerCase();
+  if (TASK_TYPE_VALUES.has(key)) return key as TaskType;
+  return API_TYPE_ALIASES[key];
+}
 
 /**
  * Task types that have list endpoints (excludes rigging and animation which have no list API)

@@ -291,10 +291,12 @@ export enum ErrorCode {
   INTERNAL_ERROR = "InternalError"
 }
 
-// Timeouts
-export const API_TIMEOUT = 30000; // 30 seconds
-export const RETRY_DELAYS = [2000, 4000, 8000]; // Exponential backoff
+// Timeouts and retries (docs: task-lifecycle "How Long to Wait")
+export const API_TIMEOUT = 30000; // GET / DELETE
+export const API_CREATE_TIMEOUT = 60000; // POST: creates are slower, and a timed-out create is never resent
+export const RETRY_DELAYS = [2000, 4000, 8000]; // Backoff when the response carries no Retry-After
 export const MAX_RETRIES = 3;
+export const MAX_RETRY_AFTER_MS = 60000; // A longer Retry-After is surfaced instead of waited out
 
 // Polling Configuration (for meshy_get_task_status wait mode)
 export const POLL_INITIAL_DELAY = 5000; // 5 seconds

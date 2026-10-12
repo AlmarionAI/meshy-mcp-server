@@ -3,16 +3,16 @@
  */
 
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig } from "axios";
-import { API_BASE_URL, API_TIMEOUT, RETRY_DELAYS, MAX_RETRIES } from "../constants.js";
+import { API_BASE_URL, API_TIMEOUT, API_CREATE_TIMEOUT, MAX_RETRIES, TaskType } from "../constants.js";
 import {
-  isRetryableError,
-  isRateLimitError,
+  retryDelayMs,
   MeshyAuthError,
   MISSING_API_KEY_MESSAGE,
   INVALID_API_KEY_MESSAGE
 } from "./error-handler.js";
 import { GetTaskResponse } from "../types.js";
 import { USER_AGENT } from "../version.js";
+import { getTaskEndpoint, PROBE_TASK_TYPES, toTaskType } from "../utils/endpoints.js";
 
 export class MeshyClient {
   private client: AxiosInstance;
@@ -54,13 +54,15 @@ export class MeshyClient {
   }
 
   /**
-   * Make a POST request with retry logic
+   * Make a POST request. Creates are not resent after a timeout, network error
+   * or 5xx (see retryDelayMs), so they get the longer timeout the docs advise.
    */
   async post<T>(endpoint: string, data?: Record<string, unknown>): Promise<T> {
     return this.requestWithRetry<T>({
       method: "POST",
       url: endpoint,
-      data
+      data,
+      timeout: API_CREATE_TIMEOUT
     });
   }
 
@@ -75,12 +77,9 @@ export class MeshyClient {
   }
 
   /**
-   * Make a request with exponential backoff retry logic
+   * Send a request, retrying as retryDelayMs allows for its method
    */
-  private async requestWithRetry<T>(
-    config: AxiosRequestConfig,
-    retryCount = 0
-  ): Promise<T> {
+  private async requestWithRetry<T>(config: AxiosRequestConfig): Promise<T> {
     if (!this.apiKey) {
       throw new MeshyAuthError(MISSING_API_KEY_MESSAGE);
     }
@@ -88,34 +87,25 @@ export class MeshyClient {
       throw new MeshyAuthError(INVALID_API_KEY_MESSAGE);
     }
 
-    try {
-      const response = await this.client.request<T>(config);
-      return response.data;
-    } catch (error) {
-      if (error instanceof AxiosError && error.response?.status === 401) {
-        this.keyRejected = true;
-        throw new MeshyAuthError(INVALID_API_KEY_MESSAGE);
-      }
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const response = await this.client.request<T>(config);
+        return response.data;
+      } catch (error) {
+        if (error instanceof AxiosError && error.response?.status === 401) {
+          this.keyRejected = true;
+          throw new MeshyAuthError(INVALID_API_KEY_MESSAGE);
+        }
 
-      // Check if we should retry
-      const shouldRetry =
-        retryCount < MAX_RETRIES &&
-        (isRetryableError(error) || isRateLimitError(error));
-
-      if (shouldRetry) {
-        const delay = RETRY_DELAYS[retryCount] || RETRY_DELAYS[RETRY_DELAYS.length - 1];
+        const delay = retryDelayMs(config.method, error, attempt);
+        if (delay === undefined) throw error;
 
         // Log retry attempt to stderr (not stdout for stdio transport)
         console.error(
-          `Request failed, retrying in ${delay}ms (attempt ${retryCount + 1}/${MAX_RETRIES})...`
+          `${config.method} ${config.url} failed, retrying in ${delay}ms (attempt ${attempt + 1}/${MAX_RETRIES})...`
         );
-
         await this.sleep(delay);
-        return this.requestWithRetry<T>(config, retryCount + 1);
       }
-
-      // No more retries, throw the error
-      throw error;
     }
   }
 
@@ -127,69 +117,57 @@ export class MeshyClient {
   }
 }
 
-/**
- * Try to fetch a task by ID from all known API endpoints.
- * Tries endpoints in priority order until one succeeds.
- * Useful when the task type is unknown.
- */
-export async function fetchTaskByIdFromKnownEndpoints(
-  client: MeshyClient,
-  taskId: string
-): Promise<{ task: GetTaskResponse; endpoint: string } | null> {
-  const endpoints = [
-    "/openapi/v2/text-to-3d",
-    "/openapi/v1/image-to-3d",
-    "/openapi/v1/multi-image-to-3d",
-    "/openapi/v1/remesh",
-    "/openapi/v1/retexture",
-    "/openapi/v1/rigging",
-    "/openapi/v1/animations",
-    "/openapi/v1/text-to-image",
-    "/openapi/v1/image-to-image",
-    "/openapi/v1/print/multi-color"
-  ];
+export interface ResolvedTask {
+  task: GetTaskResponse;
+  /** Base path the task was read from, e.g. "/openapi/v1/rigging" */
+  endpoint: string;
+  /** The task's actual type, from the API's `type` field when it sends one */
+  taskType: TaskType;
+}
 
-  for (const endpoint of endpoints) {
-    try {
-      const task = await client.get<GetTaskResponse>(`${endpoint}/${taskId}`);
-      if (task && task.id) {
-        return { task, endpoint };
-      }
-    } catch (error) {
-      // A bad key fails on every endpoint; report it, not "task not found"
-      if (error instanceof MeshyAuthError) throw error;
-      // Not found on this endpoint, try next
-      continue;
-    }
-  }
-
-  return null;
+/** 400 (malformed id) and 404 mean "not on this route"; anything else is a real failure. */
+function isNotHere(error: unknown): boolean {
+  const status = error instanceof AxiosError ? error.response?.status : undefined;
+  return status === 400 || status === 404;
 }
 
 /**
- * Fetch a task, trying the given endpoint first, then falling back to auto-inference.
- * Returns the task data and the resolved endpoint.
+ * Fetch a task whose type may be unknown or wrong.
+ *
+ * Tries `taskType` first, then every other task route (PROBE_TASK_TYPES). Some
+ * routes answer for tasks of any type, shaped for themselves, so a hit is only
+ * trusted when the task's own `type` maps to that route; otherwise it is read
+ * again from its own route, which returns the full result (image_urls,
+ * printability, rig and animation outputs, ...).
  */
 export async function getTaskWithAutoInference(
   client: MeshyClient,
   taskId: string,
-  preferredEndpoint: string
-): Promise<{ task: GetTaskResponse; endpoint: string }> {
-  // Try preferred endpoint first
-  try {
-    const task = await client.get<GetTaskResponse>(`${preferredEndpoint}/${taskId}`);
-    if (task && task.id) {
-      return { task, endpoint: preferredEndpoint };
-    }
-  } catch (error) {
-    if (error instanceof MeshyAuthError) throw error;
-    // Fall through to auto-inference
-  }
+  taskType?: TaskType
+): Promise<ResolvedTask> {
+  const candidates = taskType ? [taskType, ...PROBE_TASK_TYPES] : PROBE_TASK_TYPES;
+  const probed = new Set<string>();
 
-  // Auto-infer from all endpoints
-  const result = await fetchTaskByIdFromKnownEndpoints(client, taskId);
-  if (result) {
-    return result;
+  for (const candidate of candidates) {
+    const endpoint = getTaskEndpoint(candidate);
+    if (probed.has(endpoint)) continue;
+    probed.add(endpoint);
+
+    let task: GetTaskResponse;
+    try {
+      task = await client.get<GetTaskResponse>(`${endpoint}/${taskId}`);
+    } catch (error) {
+      if (isNotHere(error)) continue;
+      throw error;
+    }
+    if (!task?.id) continue;
+
+    const actual = toTaskType(task.type);
+    if (actual && getTaskEndpoint(actual) !== endpoint) {
+      const own = getTaskEndpoint(actual);
+      return { task: await client.get<GetTaskResponse>(`${own}/${taskId}`), endpoint: own, taskType: actual };
+    }
+    return { task, endpoint, taskType: actual ?? candidate };
   }
 
   throw new Error(`Task ${taskId} not found on any endpoint. Verify the task_id is correct.`);

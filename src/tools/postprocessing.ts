@@ -16,7 +16,7 @@ import { TaskCreatedOutputSchema } from "../schemas/output.js";
 import { ResponseFormat, RIGGING_MAX_FACES } from "../constants.js";
 import { formatTaskCreatedResponse } from "../utils/response-formatter.js";
 import { checkTextureResolution } from "../utils/generation-options.js";
-import { fetchTaskByIdFromKnownEndpoints } from "../services/meshy-client.js";
+import { getTaskWithAutoInference } from "../services/meshy-client.js";
 import {
   CreateTaskApiResponse,
   RemeshApiRequest,
@@ -365,8 +365,7 @@ Error Handling:
         // Pre-validate face count for rigging constraint
         if (params.input_task_id) {
           try {
-            const result = await fetchTaskByIdFromKnownEndpoints(client, params.input_task_id);
-            const sourceTask = result?.task;
+            const { task: sourceTask } = await getTaskWithAutoInference(client, params.input_task_id);
             if (sourceTask?.face_count && sourceTask.face_count > RIGGING_MAX_FACES) {
               const faceCount = sourceTask.face_count.toLocaleString();
               const maxFaces = RIGGING_MAX_FACES.toLocaleString();

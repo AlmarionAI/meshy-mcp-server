@@ -4,6 +4,7 @@
 
 import { z } from "zod";
 import { ResponseFormat, TaskType } from "../constants.js";
+import { toTaskType } from "../utils/endpoints.js";
 
 /**
  * Response format schema
@@ -52,9 +53,12 @@ export const PromptSchema = z.string()
   .describe("Text description");
 
 /**
- * Task type schema
+ * Task type schema. Optional: when it is omitted, unrecognized or wrong, the
+ * server finds the task on the other routes and uses the task's own type.
+ * The API's own spellings (rig, animate, print-multi-color, text-to-3d-preview)
+ * are accepted too.
  */
-export const TaskTypeSchema = z.nativeEnum(TaskType)
-  .default(TaskType.TEXT_TO_3D)
-  .catch(TaskType.TEXT_TO_3D)
-  .describe("Task type for endpoint routing. Common values: 'text-to-3d', 'image-to-3d', 'multi-image-to-3d', 'remesh', 'retexture', 'rigging', 'animation', 'text-to-image', 'image-to-image', 'convert', 'resize', 'uv-unwrap'. Creative Lab is STAGE-specific: 'creative-lab-{product}-prototype' or 'creative-lab-{product}-build' (product = figure/lamp/keychain/fridge-magnet). If omitted or unrecognized, the server auto-infers the correct endpoint by probing — so an imperfect value still resolves; never fall back to manual HTTP.");
+export const TaskTypeSchema = z.preprocess(
+  value => toTaskType(value),
+  z.nativeEnum(TaskType).optional()
+).describe("Task type for endpoint routing, e.g. 'text-to-3d', 'image-to-3d', 'multi-image-to-3d', 'remesh', 'retexture', 'rigging', 'animation', 'text-to-image', 'image-to-image', 'convert', 'resize', 'uv-unwrap', 'multi-color-print', 'print-analyze', 'print-repair'. Creative Lab is STAGE-specific: 'creative-lab-{product}-prototype' or 'creative-lab-{product}-build'. Optional: if omitted, unrecognized or wrong, the server finds the task on the other endpoints and reports its actual type, so never fall back to manual HTTP.");

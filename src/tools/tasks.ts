@@ -157,6 +157,7 @@ function formatTask(task: Task, format: ResponseFormat): string {
     lines.push(`${renderProgressBar(progress)} — ${task.status}`);
     lines.push("");
 
+    if (task.type) lines.push(`**Type**: ${task.type}`);
     lines.push(`**Phase**: ${task.phase}`);
     lines.push(`**Created**: ${new Date(task.created_at).toLocaleString()}`);
     if (task.updated_at) lines.push(`**Updated**: ${new Date(task.updated_at).toLocaleString()}`);
@@ -349,6 +350,7 @@ function buildWaitSuccessResponse(
     structuredContent: {
       outcome: "SUCCEEDED" as const,
       task_id: taskId,
+      task_type: taskType,
       status: "SUCCEEDED",
       progress: 100,
       wait_time_seconds: waitTimeSec,
@@ -380,7 +382,7 @@ export function registerTaskTools(server: McpServer, client: MeshyClient) {
 
 Args:
   - task_id (string): Task ID returned from generation tools (required)
-  - task_type (enum, optional): Task type for endpoint routing (default: "text-to-3d"). Auto-infers if wrong.
+  - task_type (enum, optional): Task type for endpoint routing. If omitted or wrong, the server finds the task and reports its actual type.
   - wait (boolean): Auto-wait until completion (default: true)
   - timeout_seconds (number): Max wait time when wait=true (default: 300, max: 300)
   - response_format (enum): "markdown" or "json" (default: "markdown")
@@ -406,12 +408,10 @@ Examples:
       }
     },
     async (params: z.infer<typeof GetTaskStatusInputSchema>, extra) => {
-      const preferredEndpoint = getTaskEndpoint(params.task_type);
-
       // --- wait=false: single query mode ---
       if (!params.wait) {
         try {
-          const { task } = await getTaskWithAutoInference(client, params.task_id, preferredEndpoint);
+          const { task, taskType } = await getTaskWithAutoInference(client, params.task_id, params.task_type);
           const textContent = formatTask(task, params.response_format);
           const modelUrls: Record<string, string> = {};
           if (task.model_urls) {
@@ -424,6 +424,7 @@ Examples:
             structuredContent: {
               outcome: task.status as string,
               task_id: params.task_id,
+              task_type: taskType,
               status: task.status,
               progress: task.progress || 0,
               model_urls: Object.keys(modelUrls).length > 0 ? modelUrls : undefined,
@@ -448,7 +449,8 @@ Examples:
       const startTime = Date.now();
       let pollCount = 0;
       let currentDelay = POLL_INITIAL_DELAY;
-      let resolvedEndpoint = preferredEndpoint;
+      let resolvedEndpoint = "";
+      let resolvedType = TaskType.TEXT_TO_3D;
 
       try {
         while (true) {
@@ -457,9 +459,10 @@ Examples:
 
           // First poll: use auto-inference to resolve the correct endpoint
           if (pollCount === 1) {
-            const result = await getTaskWithAutoInference(client, params.task_id, preferredEndpoint);
+            const result = await getTaskWithAutoInference(client, params.task_id, params.task_type);
             task = result.task;
             resolvedEndpoint = result.endpoint;
+            resolvedType = result.taskType;
           } else {
             task = await client.get<GetTaskResponse>(`${resolvedEndpoint}/${params.task_id}`);
           }
@@ -496,7 +499,7 @@ Examples:
           // Terminal: SUCCEEDED
           if (task.status === TaskStatus.SUCCEEDED) {
             const waitTimeSec = Math.round((Date.now() - startTime) / 1000);
-            return buildWaitSuccessResponse(task, params.task_id, params.task_type, waitTimeSec, pollCount);
+            return buildWaitSuccessResponse(task, params.task_id, resolvedType, waitTimeSec, pollCount);
           }
 
           // Terminal: FAILED
@@ -825,7 +828,7 @@ This tool cancels a task that is currently PENDING or IN_PROGRESS. Completed or 
 
 Args:
   - task_id (string): Task ID to cancel (required)
-  - task_type (enum, optional): Task type to route to correct endpoint (default: "text-to-3d"). Auto-infers if wrong.
+  - task_type (enum, optional): Task type for endpoint routing. If omitted or wrong, the server finds the task by its own type.
 
 Returns:
   {
@@ -856,8 +859,7 @@ Error Handling:
     },
     async (params: z.infer<typeof CancelTaskInputSchema>) => {
       try {
-        const preferredEndpoint = getTaskEndpoint(params.task_type);
-        const { task, endpoint } = await getTaskWithAutoInference(client, params.task_id, preferredEndpoint);
+        const { task, endpoint } = await getTaskWithAutoInference(client, params.task_id, params.task_type);
         const previousStatus = task.status;
 
         // Cancel the task
@@ -909,7 +911,7 @@ By default, files are auto-saved to meshy_output/ under the current working dire
 
 Args:
   - task_id (string): Task ID of completed model (required)
-  - task_type (enum, optional): Task type to route to correct endpoint (default: "text-to-3d"). Auto-infers if wrong.
+  - task_type (enum, optional): Task type for endpoint routing. If omitted or wrong, the server finds the task by its own type.
   - format (enum): Model format - "glb", "fbx", "usdz", "stl", "obj", "blend", or "3mf" (default: "glb"). IMPORTANT: Ask user which format they need before downloading. NOTE: "3mf" is downloadable only if it was generated — request it via target_formats:["3mf"] at creation, or use meshy_convert / meshy_process_multicolor.
   - include_textures (boolean): Include texture files (default: true)
   - save_to (string, optional): Override auto path with a custom ABSOLUTE path. If omitted, auto-saves to meshy_output/{timestamp}_{prompt}_{id}/.
@@ -938,8 +940,7 @@ Error Handling:
     },
     async (params: z.infer<typeof DownloadModelInputSchema>) => {
       try {
-        const preferredEndpoint = getTaskEndpoint(params.task_type);
-        const { task } = await getTaskWithAutoInference(client, params.task_id, preferredEndpoint);
+        const { task, taskType } = await getTaskWithAutoInference(client, params.task_id, params.task_type);
 
         if (task.status !== TaskStatus.SUCCEEDED) {
           return {
@@ -954,8 +955,8 @@ Error Handling:
         // Image-generation tasks (text-to-image / image-to-image) return image_urls (PNG/JPG),
         // not model_urls. Download the image(s) directly — the `format` arg is ignored here.
         const isImageTask =
-          params.task_type === TaskType.TEXT_TO_IMAGE ||
-          params.task_type === TaskType.IMAGE_TO_IMAGE ||
+          taskType === TaskType.TEXT_TO_IMAGE ||
+          taskType === TaskType.IMAGE_TO_IMAGE ||
           (!task.model_urls && Array.isArray(task.image_urls) && task.image_urls.length > 0);
         if (isImageTask) {
           const imageUrls = task.image_urls || [];
@@ -984,10 +985,10 @@ Error Handling:
               savedPaths.push(target);
             }
           } else {
-            const stage = inferStage(params.task_type, task.type);
+            const stage = inferStage(taskType, task.type);
             projectDir = resolveProjectDir(
               params.task_id,
-              params.task_type,
+              taskType,
               task.prompt,
               params.parent_task_id,
               task.created_at
@@ -1000,7 +1001,7 @@ Error Handling:
             }
             const record: TaskRecord = {
               task_id: params.task_id,
-              task_type: params.task_type,
+              task_type: taskType,
               stage,
               prompt: task.prompt,
               status: task.status,
@@ -1036,8 +1037,8 @@ ${savedPaths.map(p => `- ${p}`).join("\n")}${projectDir ? `\n**Project Folder**:
         // (e.g. lamp → base_stl + lamp_stl) that don't match the standard `format` keys.
         // When the requested format isn't a direct key, download every available part.
         if (
-          params.task_type.startsWith("creative-lab-") &&
-          params.task_type.endsWith("-build") &&
+          taskType.startsWith("creative-lab-") &&
+          taskType.endsWith("-build") &&
           task.model_urls &&
           !task.model_urls[fmt as keyof typeof task.model_urls]
         ) {
@@ -1058,8 +1059,8 @@ ${savedPaths.map(p => `- ${p}`).join("\n")}${projectDir ? `\n**Project Folder**:
                 clPaths.push(target);
               }
             } else {
-              const stage = inferStage(params.task_type, task.type);
-              clProjectDir = resolveProjectDir(params.task_id, params.task_type, task.prompt, params.parent_task_id, task.created_at);
+              const stage = inferStage(taskType, task.type);
+              clProjectDir = resolveProjectDir(params.task_id, taskType, task.prompt, params.parent_task_id, task.created_at);
               for (const [key, url] of parts) {
                 const target = path.join(clProjectDir, `${key}${modelExt(url)}`);
                 await downloadFileToLocal(url, target);
@@ -1067,7 +1068,7 @@ ${savedPaths.map(p => `- ${p}`).join("\n")}${projectDir ? `\n**Project Folder**:
               }
               const record: TaskRecord = {
                 task_id: params.task_id,
-                task_type: params.task_type,
+                task_type: taskType,
                 stage,
                 prompt: task.prompt,
                 status: task.status,
@@ -1120,7 +1121,7 @@ This task did not generate a 3MF file. 3MF is **not** included by default — it
         }
 
         // Rigging tasks: result.rigged_character_{format}_url
-        if (params.task_type === TaskType.RIGGING && task.result) {
+        if (taskType === TaskType.RIGGING && task.result) {
           const lines = [`# Rigging Download URLs`, "", `**Task ID**: ${params.task_id}`, ""];
 
           lines.push("## Rigged Character");
@@ -1166,7 +1167,7 @@ This task did not generate a 3MF file. 3MF is **not** included by default — it
         }
 
         // Animation tasks: result.animation_{format}_url
-        if (params.task_type === TaskType.ANIMATION && task.result) {
+        if (taskType === TaskType.ANIMATION && task.result) {
           const lines = [`# Animation Download URLs`, "", `**Task ID**: ${params.task_id}`, ""];
 
           lines.push("## Animation Files");
@@ -1232,7 +1233,7 @@ This task did not generate a 3MF file. 3MF is **not** included by default — it
         }
 
         // Determine save path: explicit save_to OR auto-managed output directory
-        const stage = inferStage(params.task_type, task.type);
+        const stage = inferStage(taskType, task.type);
         let savePath: string;
         let projectDir: string | undefined;
 
@@ -1242,7 +1243,7 @@ This task did not generate a 3MF file. 3MF is **not** included by default — it
           // Auto-save to meshy_output/{timestamp}_{prompt}_{id}/
           projectDir = resolveProjectDir(
             params.task_id,
-            params.task_type,
+            taskType,
             task.prompt,
             params.parent_task_id,
             task.created_at
@@ -1301,7 +1302,7 @@ This task did not generate a 3MF file. 3MF is **not** included by default — it
           if (projectDir) {
             const record: TaskRecord = {
               task_id: params.task_id,
-              task_type: params.task_type,
+              task_type: taskType,
               stage,
               prompt: task.prompt,
               status: task.status,

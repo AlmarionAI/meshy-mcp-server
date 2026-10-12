@@ -30,6 +30,7 @@ export const TaskStatusOutputSchema = z.object({
   outcome: z.enum(["SUCCEEDED", "FAILED", "CANCELED", "TIMEOUT", "IN_PROGRESS", "PENDING"])
     .describe("Final outcome of the status check"),
   task_id: z.string().describe("Task identifier"),
+  task_type: z.string().optional().describe("The task's actual type (pass it as task_type to the download and cancel tools)"),
   status: z.string().describe("Current task status from the API"),
   progress: z.number().describe("Progress percentage (0-100)"),
   // wait mode fields

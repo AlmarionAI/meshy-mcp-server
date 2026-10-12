@@ -3,7 +3,7 @@
  */
 
 import { AxiosError } from "axios";
-import { ErrorCode } from "../constants.js";
+import { ErrorCode, MAX_RETRIES, MAX_RETRY_AFTER_MS, RETRY_DELAYS } from "../constants.js";
 import { RequestValidationError } from "../utils/generation-options.js";
 
 export interface MeshyError {
@@ -116,21 +116,24 @@ export function handleMeshyError(error: unknown, context?: ErrorContext): string
         }
 
         case 429:
-          return "Error: Rate limit exceeded. Please wait before making more requests.";
+          if (isQueueFullError(error)) {
+            return `Error: Your task queue is full. ${errorData.message} Wait for one of your running tasks to finish (see \`meshy_list_tasks\`) before creating another; retrying right away will not help.`;
+          }
+          return `Error: Rate limit exceeded (429). ${errorData?.message || ""} Wait a few seconds and try again.`;
 
         case 500:
         case 502:
         case 503:
-          return "Error: Meshy service is temporarily unavailable. Please try again later.";
+          return `Error: Meshy service is temporarily unavailable (${status}).${createNote(error)}`;
 
         default:
-          return `Error: API request failed with status ${status}. ${errorData?.message || ""}`;
+          return `Error: API request failed with status ${status}. ${errorData?.message || ""}${createNote(error)}`;
       }
     }
 
     // Handle network errors
-    if (error.code === "ECONNABORTED") {
-      return "Error: Request timed out. Please check your network connection and try again.";
+    if (error.code === "ECONNABORTED" || error.code === "ETIMEDOUT") {
+      return `Error: Request timed out.${createNote(error) || " Check your network connection and try again."}`;
     }
 
     if (error.code === "ENOTFOUND") {
@@ -141,7 +144,7 @@ export function handleMeshyError(error: unknown, context?: ErrorContext): string
       return "Error: Meshy API is unavailable. Please try again later.";
     }
 
-    return `Error: Network error occurred. ${error.message}`;
+    return `Error: Network error occurred. ${error.message}${createNote(error)}`;
   }
 
   // Handle generic errors
@@ -157,6 +160,13 @@ export function handleMeshyError(error: unknown, context?: ErrorContext): string
 
   // Append context-aware suggestions if context is provided
   return appendContextSuggestions(baseMessage, error, context);
+}
+
+/** After an ambiguous create failure: tell the agent to look before it resends. */
+function createNote(error: AxiosError): string {
+  if (!createOutcomeUnknown(error)) return "";
+  return " This create request was not retried automatically: it may still have created (and charged) the task. " +
+    "Check `meshy_list_tasks` for a new task before calling this tool again.";
 }
 
 /**
@@ -199,31 +209,64 @@ function appendContextSuggestions(message: string, error: unknown, context?: Err
   return message;
 }
 
-/**
- * Check if error is a rate limit error
- */
-export function isRateLimitError(error: unknown): boolean {
-  if (error instanceof AxiosError) {
-    return error.response?.status === 429;
-  }
-  return false;
+function responseMessage(error: AxiosError): string {
+  const data = error.response?.data as { message?: unknown } | undefined;
+  return typeof data?.message === "string" ? data.message : "";
 }
 
 /**
- * Check if error is a network error that should be retried
+ * A queue-full 429 (`NoMorePendingTasks`, or `NoMoreConcurrentTasks` when the
+ * credits ran out): the account already runs its maximum of unfinished tasks.
+ * It carries no Retry-After; only a task finishing frees a slot.
  */
-export function isRetryableError(error: unknown): boolean {
-  if (error instanceof AxiosError) {
-    // Retry on network errors
-    if (!error.response) {
-      return true;
-    }
+export function isQueueFullError(error: unknown): boolean {
+  return error instanceof AxiosError &&
+    error.response?.status === 429 &&
+    /^NoMore(Pending|Concurrent)Tasks/.test(responseMessage(error));
+}
 
-    // Retry on 5xx server errors
-    const status = error.response.status;
-    return status >= 500 && status < 600;
-  }
-  return false;
+function retryAfterMs(error: AxiosError): number | undefined {
+  const raw = error.response?.headers?.["retry-after"];
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  const seconds = Number(raw);
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : undefined;
+}
+
+/** The request limiter's 429: refused before any handler ran, so nothing was created. */
+function isRequestRateLimit(error: AxiosError): boolean {
+  return error.response?.status === 429 &&
+    (retryAfterMs(error) !== undefined || /rate limit exceeded/i.test(responseMessage(error)));
+}
+
+/** A POST that may have reached the handler: it can have created (and charged) a task. */
+function createOutcomeUnknown(error: AxiosError): boolean {
+  if (error.config?.method?.toUpperCase() !== "POST") return false;
+  const status = error.response?.status;
+  if (status !== undefined) return status >= 500;
+  return error.code !== "ENOTFOUND" && error.code !== "ECONNREFUSED";
+}
+
+/**
+ * Milliseconds to wait before retrying a failed request, or undefined to give up.
+ *
+ * GET and DELETE retry on a timeout, a network error, a 429 or a 5xx. A POST
+ * creates a task and charges for it: after a timeout, a dropped connection or a
+ * 5xx it may have gone through, and resending it would create and bill a second
+ * task (docs: errors, "Best Practices"). So a POST only retries the request
+ * limiter's 429, which is refused before anything is created — never a
+ * queue-full 429, which only a finished task clears. Retry-After is honored
+ * when present.
+ */
+export function retryDelayMs(method: string | undefined, error: unknown, attempt: number): number | undefined {
+  if (attempt >= MAX_RETRIES || !(error instanceof AxiosError)) return undefined;
+  const status = error.response?.status;
+  const retryable = method?.toUpperCase() === "POST"
+    ? isRequestRateLimit(error)
+    : !isQueueFullError(error) && (status === undefined || status === 429 || status >= 500);
+  if (!retryable) return undefined;
+  const hinted = retryAfterMs(error);
+  if (hinted !== undefined) return hinted <= MAX_RETRY_AFTER_MS ? Math.max(hinted, 1000) : undefined;
+  return RETRY_DELAYS[Math.min(attempt, RETRY_DELAYS.length - 1)];
 }
 
 /**
