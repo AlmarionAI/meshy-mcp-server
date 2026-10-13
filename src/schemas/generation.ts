@@ -144,7 +144,7 @@ export const ImageTo3DInputSchema = z.object({
     .describe("A SUCCEEDED text-to-image / image-to-image task with exactly one image, used as the input."),
   ai_model: z.union([z.nativeEnum(AIModel), z.nativeEnum(SmartTopologyModel)])
     .optional()
-    .describe(`${STANDARD_MODELS}. With model_type smart-topology: 'meshy-t2' (the default there).`),
+    .describe(`${STANDARD_MODELS}. With model_type smart-topology: 'meshy-t2' (the default there); 'meshy-t1' is deprecated, use meshy-t2.`),
   geometry_resolution: geometryResolution(),
   ultra_mode: deprecatedUltraMode(),
   model_type: modelType(),

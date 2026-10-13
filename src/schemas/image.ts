@@ -19,7 +19,7 @@ const aspectRatio = () => z.nativeEnum(AspectRatio)
  */
 export const TextToImageInputSchema = z.object({
   ai_model: z.nativeEnum(TextToImageModel)
-    .describe("Image model; ask the user (costs differ per model)."),
+    .describe("Image model; ask the user."),
   prompt: PromptSchema,
   generate_multi_view: z.boolean()
     .default(false)
@@ -37,7 +37,7 @@ export const TextToImageInputSchema = z.object({
  */
 export const ImageToImageInputSchema = z.object({
   ai_model: z.nativeEnum(TextToImageModel)
-    .describe("Image model; ask the user (costs differ per model)."),
+    .describe("Image model; ask the user."),
   prompt: PromptSchema,
   input_task_id: z.string()
     .optional()

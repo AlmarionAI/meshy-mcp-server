@@ -60,7 +60,7 @@ export const PromptSchema = z.string()
 export const TaskTypeSchema = z.preprocess(
   value => toTaskType(value),
   z.nativeEnum(TaskType).optional()
-).describe("Optional: if omitted or wrong, the server finds the task and reports its real type. The API's names (rig, animate, print-multi-color) work too.");
+).describe("Optional: if omitted or wrong, the server finds the task and reports its real type.");
 
 /**
  * Task type filter for listing: takes the same names, API spellings included,

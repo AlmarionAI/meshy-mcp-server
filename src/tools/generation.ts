@@ -35,6 +35,7 @@ export function registerGenerationTools(server: McpServer, client: MeshyClient) 
     {
       title: "Generate 3D Model from Text",
       description: `Generate an untextured 3D PREVIEW from a text prompt; texture it afterwards with meshy_text_to_3d_refine once the user approves. Typically 2–3 minutes.
+Cost: 20 credits (meshy-7.1 / latest / meshy-6), 5 (meshy-6-lite, meshy-t2); Ultra geometry +5.
 
 PREFER THE IMAGE ROUTE: for higher quality and more control, generate a design image first (meshy_text_to_image), let the user approve it, then meshy_image_to_3d with input_task_id = the image task (textured in one task). Use direct text-to-3d for a quick draft or when the user explicitly asks for it.
 
@@ -128,6 +129,7 @@ Examples:
     {
       title: "Generate 3D Model from Image",
       description: `Generate a 3D model from one image, textured by default (no refine step; should_texture false for a bare mesh). Typically 2–3 minutes.
+Cost: meshy-7.1 / latest / meshy-6 20 mesh only, 30 textured, 35 at 8K; meshy-6-lite 5 / 15; meshy-t2 5 / 15 / 20 at 8K; Ultra geometry +5.
 
 IMAGE INPUT (exactly ONE):
   - file_path: a local image (RECOMMENDED; never base64-encode it yourself)
@@ -263,7 +265,7 @@ Example: { file_path: "/path/to/character.png", pose_mode: "t-pose" }`,
     "meshy_text_to_3d_refine",
     {
       title: "Refine Text-to-3D Preview",
-      description: `Texture a SUCCEEDED meshy_text_to_3d preview. Get the user's approval first; omit ai_model to inherit the preview's model.
+      description: `Texture a SUCCEEDED meshy_text_to_3d preview. Cost: 10 credits (15 at 8K). Get the user's approval first; omit ai_model to inherit the preview's model.
 
 Example: { preview_task_id: "abc-123", texture_prompt: "rusty metal", enable_pbr: true }`,
       inputSchema: TextTo3DRefineInputSchema,
@@ -347,6 +349,7 @@ Example: { preview_task_id: "abc-123", texture_prompt: "rusty metal", enable_pbr
     {
       title: "Generate 3D Model from Multiple Images",
       description: `Generate a 3D model from 1–4 views of the same object (better reconstruction), textured by default.
+Cost: meshy-7.1 / latest / meshy-6 20 mesh only, 30 textured, 35 at 8K; meshy-6-lite 5 / 15; Ultra geometry +5.
 
 IMAGE INPUT (exactly ONE):
   - file_paths: 1–4 local images (never base64-encode them yourself)

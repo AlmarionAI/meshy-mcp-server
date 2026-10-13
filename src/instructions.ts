@@ -7,7 +7,7 @@
 export const MESHY_INSTRUCTIONS = `
 # Meshy AI — Workflow Guide
 
-Every create tool returns {task_id, status}. Wait for it with meshy_get_task_status (task_type is inferred when omitted), then meshy_download_model.
+Every create tool returns {task_id, status}, except meshy_creative_lab, which waits and returns the finished model. Wait for it with meshy_get_task_status (task_type is inferred when omitted), then meshy_download_model.
 Earlier results: meshy_list_models lists finished 3D models (image-to-3d by default; task_types widens it); meshy_list_tasks lists every task, unfinished ones included.
 
 ## Rule 1: Cost Confirmation
@@ -53,7 +53,7 @@ Suggested flow:
 1. Detect installed slicers (meshy_send_to_slicer, slicer_type:"auto") — present list, save for later
 2. Generate an untextured model with target_formats:["obj"]: meshy_text_to_3d (preview), or meshy_image_to_3d with should_texture:false
 3. Wait for completion
-4. Optionally check printability (meshy_analyze_printability, free). If it reports errors, repair with model_url = the generation task's OBJ URL (model_urls.obj) so the result stays OBJ; repair by input_task_id outputs GLB, which print_ready cannot fix
+4. Optionally check printability (meshy_analyze_printability, free). If it reports errors, either repair with model_url = the generation task's OBJ URL (model_urls.obj) so the result stays OBJ — on that route pass printer_type and intended_print_longest_side_mm, since intended_print_height_mm only works with task / GLB input — or repair by the analyze task, then meshy_convert the repaired GLB to obj (1 credit). print_ready only fixes OBJ
 5. Download the OBJ (the repair task's, if repaired) with print_ready=true and print_height_mm (local Z-up fix and scaling)
 6. Present slicer list from step 1, ask user which to use, run its launch_command
 If the model must be printed in pieces (too big for the bed, separate colors or materials), use Scenario L.
@@ -128,7 +128,7 @@ Suggested flow:
 Trigger: model is too big for the print bed, or parts should be printed separately / in different colors and assembled.
 Suggested flow:
 1. Check the source qualifies (see meshy_auto_split).
-2. Confirm the cost and how to cut: mode "auto", "by_parts" with a prompt naming 1–10 parts, or "by_color" (image-to-3d / multi-image-to-3d sources only). There is no bed-size parameter: resize to the print size first if parts must fit a bed. Offer connectors so the pieces fit together, layout "on_plate" for print-ready placement, and target_formats ["3mf"] for separately selectable parts in a slicer.
+2. Confirm the cost and how to cut: mode "auto", "by_parts" with a prompt naming 1–10 parts, or "by_color" (image-to-3d / multi-image-to-3d sources only). There is no bed-size parameter: resize to the print size first if parts must fit a bed, then check part sizes and re-split by_parts if one is still too big. Offer connectors so the pieces fit together, layout "on_plate" for print-ready placement, and target_formats ["3mf"] for separately selectable parts in a slicer.
 3. meshy_auto_split, wait, meshy_download_model, then open the file in a slicer (meshy_send_to_slicer).
 
 ## Scenario G: General 3D Model (default)

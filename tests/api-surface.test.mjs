@@ -326,3 +326,16 @@ test("list_models asks only image-to-3d by default and merges the types it is gi
   assert.equal(h.gets.at(-1).query.page_size, 3);
   assert.equal(h.schema("meshy_list_models").safeParse({ task_types: ["text-to-image"] }).success, false);
 });
+
+test("task status carries type-specific results and fits its output schema", async () => {
+  const { TaskStatusOutputSchema } = await import("../dist/schemas/output.js");
+  const split = () => ({ id: "s", type: "print-split", status: "SUCCEEDED", progress: 100, part_count: 4, prompt_ignored: true, model_urls: { glb: "u" }, thumbnail_url: "t" });
+  const h = createHarness(registerTaskTools, { "/openapi/v1/print/split/s": split });
+  for (const wait of [false, true]) {
+    const result = await h.run("meshy_get_task_status", { task_id: "s", task_type: "print-split", wait });
+    const out = JSON.parse(JSON.stringify(result.structuredContent));
+    assert.equal(out.part_count, 4, JSON.stringify(result));
+    assert.equal(out.prompt_ignored, true);
+    assert.equal(TaskStatusOutputSchema.strict().safeParse(out).success, true, JSON.stringify(out));
+  }
+});

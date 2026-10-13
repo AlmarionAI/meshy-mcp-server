@@ -27,6 +27,7 @@ export function registerImageTools(server: McpServer, client: MeshyClient) {
     {
       title: "Generate 2D Image from Text",
       description: `Generate a 2D image from text, e.g. a design for the user to approve before 3D. Typically ~30 s.
+Cost: nano-banana 3, nano-banana-2 6, nano-banana-2-lite 3, nano-banana-2-1 4, nano-banana-pro 9, GPT Image models 9 credits.
 
 To make it 3D: meshy_image_to_3d with input_task_id = this task (multi-view output: meshy_multi_image_to_3d).
 
@@ -95,7 +96,8 @@ Example: { ai_model: "nano-banana-pro", prompt: "game character", generate_multi
     "meshy_image_to_image",
     {
       title: "Transform Image using AI",
-      description: `Edit or restyle images with a text prompt. Give exactly ONE reference source: input_task_id (all images of an earlier image task), reference_file_paths (local files; never base64-encode them yourself) or reference_image_urls.
+      description: `Edit or restyle images with a text prompt. Cost: nano-banana 3, nano-banana-2 6, nano-banana-2-lite 3, nano-banana-2-1 4, nano-banana-pro 9, GPT Image models 12 credits.
+Give exactly ONE reference source: input_task_id (all images of an earlier image task), reference_file_paths (local files; never base64-encode them yourself) or reference_image_urls.
 
 To make the result 3D: meshy_image_to_3d with input_task_id = this task (multi-view output: meshy_multi_image_to_3d).
 

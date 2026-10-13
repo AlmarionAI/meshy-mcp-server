@@ -241,6 +241,18 @@ function formatTask(task: Task, format: ResponseFormat): string {
   }
 }
 
+/** Type-specific result fields for structuredContent; only the ones the task has. */
+function taskExtras(task: Task) {
+  return {
+    thumbnail_url: task.thumbnail_url || undefined,
+    alpha_thumbnail_url: task.alpha_thumbnail_url || undefined,
+    printability: task.printability ?? undefined,
+    part_count: task.part_count ?? undefined,
+    prompt_ignored: task.prompt_ignored ?? undefined,
+    result: task.result ?? undefined
+  };
+}
+
 /**
  * Build a rich success response with progress bar for wait mode
  */
@@ -392,9 +404,7 @@ function buildWaitSuccessResponse(
       vertex_count: task.vertex_count,
       face_count: task.face_count,
       consumed_credits: task.consumed_credits,
-      printability: task.printability,
-      result: task.result,
-      part_count: task.part_count
+      ...taskExtras(task)
     }
   };
 }
@@ -445,6 +455,7 @@ wait=true polls at the API's suggested interval (else 5s→30s backoff) until SU
               vertex_count: task.vertex_count,
               face_count: task.face_count,
               consumed_credits: task.consumed_credits,
+              ...taskExtras(task),
               error_type: task.task_error?.type,
               error_code: task.task_error?.code,
               error_message: task.task_error?.message,

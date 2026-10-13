@@ -44,6 +44,12 @@ export const TaskStatusOutputSchema = z.object({
   image_urls: z.array(z.string()).optional(),
   vertex_count: z.number().optional(),
   face_count: z.number().optional(),
+  thumbnail_url: z.string().optional(),
+  alpha_thumbnail_url: z.string().optional(),
+  printability: z.record(z.unknown()).optional().describe("print-analyze result: status, issue counts, metrics, thin walls"),
+  part_count: z.number().optional().describe("Auto Split: number of parts"),
+  prompt_ignored: z.boolean().optional().describe("Auto Split: the prompt was unreadable, so the cuts were chosen automatically"),
+  result: z.record(z.unknown()).optional().describe("Rigging, animation and text-to-motion file URLs"),
   consumed_credits: z.number().optional().describe("Credits consumed by the task (0 for FAILED — credits are refunded on failure)"),
   // error fields
   error_type: z.string().optional().describe("Failure category if the task failed: invalid_input (fix the input), timeout / service_unavailable / server_error (refunded; create it again)"),

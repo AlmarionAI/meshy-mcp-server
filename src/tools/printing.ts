@@ -375,7 +375,7 @@ Download with format "3mf", then open it with meshy_send_to_slicer (is_multicolo
       title: "Auto Split Model into Printable Parts",
       description: `Cut a model into separately printable parts: when it is too big for the bed, parts need different colors/materials, or it should be assembled. Cost: ${AUTO_SPLIT_CREDITS} credits. The texture is not kept.
 
-There is no bed-size parameter: cuts follow mode and prompt, not your printer, so resize the model to the print size first (meshy_resize) when parts must fit a bed.
+There is no bed-size parameter: cuts follow mode and prompt, not your printer, so resize the model to the print size first (meshy_resize) when parts must fit a bed, then check the part sizes and re-split by_parts if one is still too big.
 Then meshy_download_model (3mf if requested) and meshy_send_to_slicer.
 
 Example: { input_task_id: "abc-123", mode: "by_parts", prompt: "the figure and the base", target_formats: ["3mf"], connectors: true }`,

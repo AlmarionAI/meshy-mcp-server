@@ -89,9 +89,9 @@ export const ListModelsInputSchema = z.object({
     .describe("Model task types to list (default [\"image-to-3d\"], one request). Pass several, e.g. [\"text-to-3d\", \"image-to-3d\", \"multi-image-to-3d\"], to widen; each type is one more request."),
   workspace_id: z.string()
     .optional()
-    .describe("Ignored; accepted for compatibility."),
+    .describe("Deprecated; ignored."),
   filter: z.enum(["all", "published", "private"])
     .optional()
-    .describe("Ignored (the API reports no publish state); accepted for compatibility."),
+    .describe("Deprecated; ignored."),
   response_format: ResponseFormatSchema
 }).merge(PaginationSchema).strict();
