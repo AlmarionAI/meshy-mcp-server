@@ -7,7 +7,7 @@ import axios from "axios";
 import * as fs from "fs";
 import * as path from "path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { MeshyClient, getTaskWithAutoInference } from "../services/meshy-client.js";
+import { MeshyClient, getTaskWithAutoInference, pollTask, listAcrossTypes } from "../services/meshy-client.js";
 import { handleMeshyError } from "../services/error-handler.js";
 import {
   GetTaskStatusInputSchema,
@@ -20,14 +20,11 @@ import {
   ResponseFormat,
   TaskStatus,
   TaskType,
-  CHARACTER_LIMIT,
-  POLL_INITIAL_DELAY,
-  POLL_MAX_DELAY,
-  POLL_BACKOFF_FACTOR,
-  POLL_FINALIZATION_DELAY
+  CHARACTER_LIMIT
 } from "../constants.js";
 import { Task, GetTaskResponse, TextureUrlsObject } from "../types.js";
-import { getTaskEndpoint, LIST_CAPABLE_TASK_TYPES } from "../utils/endpoints.js";
+import { DEFAULT_LIST_TASK_TYPES } from "../utils/endpoints.js";
+import { describeTaskError } from "../utils/response-formatter.js";
 import {
   resolveProjectDir,
   getFilePath,
@@ -132,8 +129,23 @@ async function downloadFileToLocal(url: string, saveTo: string): Promise<number>
   });
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+const RETENTION_MS = 3 * 24 * 60 * 60 * 1000;
+
+/**
+ * When the task's download URLs stop working: the API's own expires_at, else
+ * 3 days after finished_at (API docs: asset retention; Enterprise accounts
+ * keep results indefinitely).
+ */
+function expiresAt(task: Task): string | undefined {
+  if (task.expires_at) return new Date(task.expires_at).toISOString();
+  const finished = typeof task.finished_at === "number" ? task.finished_at : Date.parse(task.finished_at ?? "");
+  return finished > 0 ? new Date(finished + RETENTION_MS).toISOString() : undefined;
+}
+
+function expiryNote(task: Task, saved = true): string {
+  const at = expiresAt(task);
+  return `**Note**: The Meshy download URLs stop working${at ? ` at ${at}` : ""} (results are kept for 3 days after the task finishes).` +
+    (saved ? " Local files are permanent." : " Download the files before then.");
 }
 
 /**
@@ -157,7 +169,8 @@ function formatTask(task: Task, format: ResponseFormat): string {
     lines.push(`${renderProgressBar(progress)} — ${task.status}`);
     lines.push("");
 
-    lines.push(`**Phase**: ${task.phase}`);
+    if (task.type) lines.push(`**Type**: ${task.type}`);
+    if (task.phase) lines.push(`**Phase**: ${task.phase}`);
     lines.push(`**Created**: ${new Date(task.created_at).toLocaleString()}`);
     if (task.updated_at) lines.push(`**Updated**: ${new Date(task.updated_at).toLocaleString()}`);
     lines.push("");
@@ -219,14 +232,25 @@ function formatTask(task: Task, format: ResponseFormat): string {
       lines.push("**TIP**: Use `meshy_get_task_status` with wait=true (default) to auto-wait until completion.");
     } else if (task.status === TaskStatus.FAILED && task.task_error) {
       lines.push(`## Error`);
-      if (task.task_error.code) lines.push(`**Code**: ${task.task_error.code}`);
-      lines.push(`**Message**: ${task.task_error.message}`);
+      lines.push(describeTaskError(task.task_error));
     }
 
     return lines.join("\n");
   } else {
     return JSON.stringify(task, null, 2);
   }
+}
+
+/** Type-specific result fields for structuredContent; only the ones the task has. */
+function taskExtras(task: Task) {
+  return {
+    thumbnail_url: task.thumbnail_url || undefined,
+    alpha_thumbnail_url: task.alpha_thumbnail_url || undefined,
+    printability: task.printability ?? undefined,
+    part_count: task.part_count ?? undefined,
+    prompt_ignored: task.prompt_ignored ?? undefined,
+    result: task.result ?? undefined
+  };
 }
 
 /**
@@ -288,7 +312,7 @@ function buildWaitSuccessResponse(
       lines.push("- **Running animation**: included FREE");
     }
     lines.push("");
-    lines.push("**NOTE**: Walking and running animations are included FREE with rigging. Do NOT call `meshy_animate` for these — only use it for CUSTOM animations (3 credits each).");
+    lines.push("**NOTE**: Walking and running are included FREE as separate files; `meshy_animate` (3 credits per action) is for other actions, or walk/run bundled into one multi-clip file.");
     lines.push("");
   }
 
@@ -297,6 +321,22 @@ function buildWaitSuccessResponse(
     lines.push("## Animation Result");
     if (task.result.animation_glb_url) lines.push("- Animation GLB available");
     if (task.result.animation_fbx_url) lines.push("- Animation FBX available");
+    lines.push("");
+  }
+
+  // Text-to-motion results
+  if (taskType === TaskType.TEXT_TO_MOTION && task.result?.motion_url) {
+    lines.push("## Motion Clip");
+    lines.push(`- ${task.result.motion_format?.toUpperCase() ?? "Clip"}, ${((task.result.duration_ms ?? 0) / 1000).toFixed(1)}s (${task.result.mode ?? "prime"})`);
+    lines.push(`- Apply it to a rigged character: \`meshy_animate\` with motion_task_id "${taskId}" (biped rigs, within 3 days)`);
+    lines.push("");
+  }
+
+  // Auto Split results
+  if (taskType === TaskType.PRINT_SPLIT && task.part_count !== undefined) {
+    lines.push(`## Split Result`);
+    lines.push(`- **Parts**: ${task.part_count}`);
+    if (task.prompt_ignored) lines.push("- The prompt could not be read, so Meshy chose the cuts automatically (prompt_ignored).");
     lines.push("");
   }
 
@@ -318,13 +358,17 @@ function buildWaitSuccessResponse(
     lines.push(`| non-manifold edges | ${m.non_manifold_edges} |`);
     lines.push(`| degenerate faces | ${m.degenerate_faces} |`);
     lines.push(`| holes | ${m.holes} |`);
+    if (p.thin_walls && p.intended_print) {
+      const ratio = p.thin_walls.thin_area_ratio;
+      lines.push(`| thin walls (< ${p.intended_print.wall_thickness_mm} mm, ${p.intended_print.printer_type} at ${p.intended_print.longest_side_mm} mm) | ${p.thin_walls.status}${ratio !== null ? `, ${(ratio * 100).toFixed(1)}% of the surface` : ""} |`);
+    }
     lines.push("");
     if (p.status === "error") {
-      lines.push(`**Recommendation**: \`meshy_repair_printability\` (10 credits) before printing — errors block reliable FDM output.`);
+      lines.push(`**Recommendation**: \`meshy_repair_printability\` (10 credits) before printing — errors block a reliable print.`);
     } else if (p.status === "warning") {
       lines.push(`**Recommendation**: repair is optional; warnings (degenerate faces / holes) won't block printing but may affect surface quality.`);
     } else if (p.status === "healthy") {
-      lines.push(`**Recommendation**: model is print-ready — proceed to slicer.`);
+      lines.push(`**Recommendation**: model is print-ready — download the analyzed source task's model (not this analyze task, which has no model) and open it in a slicer.`);
     }
     lines.push("");
   }
@@ -334,7 +378,8 @@ function buildWaitSuccessResponse(
   if (taskType !== TaskType.PRINT_ANALYZE) {
     lines.push("**Next Steps**: Use `meshy_download_model` with task_id \"" + taskId + "\"" +
       (taskType !== TaskType.TEXT_TO_3D ? ` and task_type "${taskType}"` : "") +
-      " to get download URLs.");
+      (taskType === TaskType.MULTI_COLOR_PRINT ? ' and format "3mf"' : "") +
+      " to get the files.");
   }
 
   const modelUrls: Record<string, string> = {};
@@ -349,6 +394,7 @@ function buildWaitSuccessResponse(
     structuredContent: {
       outcome: "SUCCEEDED" as const,
       task_id: taskId,
+      task_type: taskType,
       status: "SUCCEEDED",
       progress: 100,
       wait_time_seconds: waitTimeSec,
@@ -358,7 +404,7 @@ function buildWaitSuccessResponse(
       vertex_count: task.vertex_count,
       face_count: task.face_count,
       consumed_credits: task.consumed_credits,
-      printability: task.printability
+      ...taskExtras(task)
     }
   };
 }
@@ -372,30 +418,9 @@ export function registerTaskTools(server: McpServer, client: MeshyClient) {
     "meshy_get_task_status",
     {
       title: "Get Task Status",
-      description: `Check task status or wait for completion. Supports two modes:
+      description: `Wait for a task to finish (wait=true, default) or check it once (wait=false). Reports the task's real task_type; pass it to the download and cancel tools.
 
-**wait=true (default)**: Auto-polls with exponential backoff (5s→30s, 15s at 95%+) until SUCCEEDED/FAILED/TIMEOUT. Returns full result with progress bar. Recommended — call once and get the final result.
-
-**wait=false**: Returns current status immediately (single query) with progress bar.
-
-Args:
-  - task_id (string): Task ID returned from generation tools (required)
-  - task_type (enum, optional): Task type for endpoint routing (default: "text-to-3d"). Auto-infers if wrong.
-  - wait (boolean): Auto-wait until completion (default: true)
-  - timeout_seconds (number): Max wait time when wait=true (default: 300, max: 300)
-  - response_format (enum): "markdown" or "json" (default: "markdown")
-
-Returns (wait=true, SUCCEEDED):
-  Progress bar + full task data + model info + download instructions
-
-Returns (wait=false):
-  Progress bar + current status snapshot
-
-Examples:
-  - Auto-wait: { task_id: "abc-123" }
-  - Quick check: { task_id: "abc-123", wait: false }
-  - Image-to-3d: { task_id: "abc-123", task_type: "image-to-3d" }
-  - Short timeout: { task_id: "abc-123", timeout_seconds: 60 }`,
+wait=true polls at the API's suggested interval (else 5s→30s backoff) until SUCCEEDED / FAILED / CANCELED or timeout_seconds runs out; a failed status check (timeout, 429, 5xx) is retried at the next poll. Running out of time returns outcome "TIMEOUT": the task keeps running on Meshy — call again with the same task_id (Meshy advises allowing up to 60 minutes from creation).`,
       inputSchema: GetTaskStatusInputSchema,
       outputSchema: TaskStatusOutputSchema,
       annotations: {
@@ -406,12 +431,10 @@ Examples:
       }
     },
     async (params: z.infer<typeof GetTaskStatusInputSchema>, extra) => {
-      const preferredEndpoint = getTaskEndpoint(params.task_type);
-
       // --- wait=false: single query mode ---
       if (!params.wait) {
         try {
-          const { task } = await getTaskWithAutoInference(client, params.task_id, preferredEndpoint);
+          const { task, taskType } = await getTaskWithAutoInference(client, params.task_id, params.task_type);
           const textContent = formatTask(task, params.response_format);
           const modelUrls: Record<string, string> = {};
           if (task.model_urls) {
@@ -424,6 +447,7 @@ Examples:
             structuredContent: {
               outcome: task.status as string,
               task_id: params.task_id,
+              task_type: taskType,
               status: task.status,
               progress: task.progress || 0,
               model_urls: Object.keys(modelUrls).length > 0 ? modelUrls : undefined,
@@ -431,8 +455,11 @@ Examples:
               vertex_count: task.vertex_count,
               face_count: task.face_count,
               consumed_credits: task.consumed_credits,
+              ...taskExtras(task),
+              error_type: task.task_error?.type,
               error_code: task.task_error?.code,
-              error_message: task.task_error?.message
+              error_message: task.task_error?.message,
+              error_doc_url: task.task_error?.doc_url
             }
           };
         } catch (error) {
@@ -444,162 +471,136 @@ Examples:
       }
 
       // --- wait=true: polling mode ---
-      const timeoutMs = params.timeout_seconds * 1000;
       const startTime = Date.now();
-      let pollCount = 0;
-      let currentDelay = POLL_INITIAL_DELAY;
-      let resolvedEndpoint = preferredEndpoint;
+      const elapsed = () => Math.round((Date.now() - startTime) / 1000);
+      const stillRunning =
+        "The task keeps running on Meshy: stopping the wait does not cancel it. Call `meshy_get_task_status` " +
+        "again with the same task_id to keep waiting. Meshy advises waiting at least 60 minutes from the task's " +
+        "creation before giving up; most tasks finish in a few minutes.";
 
       try {
-        while (true) {
-          pollCount++;
-          let task: GetTaskResponse;
-
-          // First poll: use auto-inference to resolve the correct endpoint
-          if (pollCount === 1) {
-            const result = await getTaskWithAutoInference(client, params.task_id, preferredEndpoint);
-            task = result.task;
-            resolvedEndpoint = result.endpoint;
-          } else {
-            task = await client.get<GetTaskResponse>(`${resolvedEndpoint}/${params.task_id}`);
-          }
-
+        const result = await pollTask(client, params.task_id, params.task_type, params.timeout_seconds * 1000, async (task, polls) => {
           const progress = task.progress || 0;
-
-          // Send progress notification via logging (primary channel)
           try {
             server.sendLoggingMessage({
               level: "info",
-              data: `${renderProgressBar(progress)} — ${task.status} (poll #${pollCount})`
+              data: `${renderProgressBar(progress)} — ${task.status} (poll #${polls})`
             });
           } catch {
             // Logging not critical
           }
-
-          // Send structured progress notification (enhanced channel for clients that support it)
           if (extra._meta?.progressToken !== undefined) {
             try {
               await server.server.notification({
                 method: "notifications/progress",
                 params: {
                   progressToken: extra._meta.progressToken,
-                  progress: progress,
+                  progress,
                   total: 100,
                   message: `${task.status} - ${renderProgressBar(progress, 20, false)}`
                 }
               });
             } catch {
-              // Client may not support progress notifications, silently ignore
+              // Client may not support progress notifications
             }
           }
+        });
+        const { task, polls } = result;
+        const waitTimeSec = elapsed();
+        const progress = task?.progress || 0;
 
-          // Terminal: SUCCEEDED
-          if (task.status === TaskStatus.SUCCEEDED) {
-            const waitTimeSec = Math.round((Date.now() - startTime) / 1000);
-            return buildWaitSuccessResponse(task, params.task_id, params.task_type, waitTimeSec, pollCount);
-          }
+        if (task?.status === TaskStatus.SUCCEEDED) {
+          return buildWaitSuccessResponse(task, params.task_id, result.taskType ?? TaskType.TEXT_TO_3D, waitTimeSec, polls);
+        }
 
-          // Terminal: FAILED
-          if (task.status === TaskStatus.FAILED) {
-            const waitTimeSec = Math.round((Date.now() - startTime) / 1000);
-            const errorMsg = task.task_error?.message || "Unknown error";
-            const errorCode = task.task_error?.code || "";
-            return {
-              isError: true,
-              content: [{
-                type: "text" as const,
-                text: `# Task Failed
+        if (task?.status === TaskStatus.FAILED) {
+          const retryHint = task.task_error?.type === "invalid_input"
+            ? "Fix the input (see the message above) before creating the task again."
+            : "Credits for a failed task are refunded. Creating it again often works; simplify the input if it keeps failing.";
+          return {
+            isError: true,
+            content: [{
+              type: "text" as const,
+              text: `# Task Failed
 
-${renderProgressBar(progress)} — FAILED (${waitTimeSec}s, ${pollCount} polls)
+${renderProgressBar(progress)} — FAILED (${waitTimeSec}s, ${polls} polls)
 
 **Task ID**: ${params.task_id}
-**Error**: ${errorCode ? `[${errorCode}] ` : ""}${errorMsg}
+**Error**: ${describeTaskError(task.task_error)}
 
-The task failed during processing. You may want to retry with different parameters.`
-              }],
-              structuredContent: {
-                outcome: "FAILED" as const,
-                task_id: params.task_id,
-                status: "FAILED",
-                progress,
-                error_code: errorCode || undefined,
-                error_message: errorMsg,
-                wait_time_seconds: waitTimeSec,
-                poll_count: pollCount
-              }
-            };
-          }
+${retryHint}`
+            }],
+            structuredContent: {
+              outcome: "FAILED" as const,
+              task_id: params.task_id,
+              task_type: result.taskType,
+              status: "FAILED",
+              progress,
+              error_type: task.task_error?.type,
+              error_code: task.task_error?.code,
+              error_message: task.task_error?.message || "Unknown error",
+              error_doc_url: task.task_error?.doc_url,
+              wait_time_seconds: waitTimeSec,
+              poll_count: polls
+            }
+          };
+        }
 
-          // Terminal: CANCELED
-          if (task.status === TaskStatus.CANCELED) {
-            const waitTimeSec = Math.round((Date.now() - startTime) / 1000);
-            return {
-              content: [{
-                type: "text" as const,
-                text: `# Task Canceled
+        if (task?.status === TaskStatus.CANCELED) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: `# Task Canceled
 
-${renderProgressBar(progress)} — CANCELED (${waitTimeSec}s, ${pollCount} polls)
+${renderProgressBar(progress)} — CANCELED (${waitTimeSec}s, ${polls} polls)
 
 **Task ID**: ${params.task_id}`
-              }],
-              structuredContent: {
-                outcome: "CANCELED" as const,
-                task_id: params.task_id,
-                status: "CANCELED",
-                progress,
-                wait_time_seconds: waitTimeSec,
-                poll_count: pollCount
-              }
-            };
-          }
-
-          // Check timeout before sleeping
-          const elapsed = Date.now() - startTime;
-          if (elapsed + currentDelay > timeoutMs) {
-            const waitTimeSec = Math.round(elapsed / 1000);
-            return {
-              isError: true,
-              content: [{
-                type: "text" as const,
-                text: `# Task Timeout
-
-${renderProgressBar(progress)} — ${task.status} (${waitTimeSec}s, ${pollCount} polls)
-
-**Task ID**: ${params.task_id}
-**Timeout**: ${params.timeout_seconds}s exceeded
-
-The task is still processing. You can:
-1. Call \`meshy_get_task_status\` again with a longer timeout_seconds
-2. Call with wait=false to check status manually`
-              }],
-              structuredContent: {
-                outcome: "TIMEOUT" as const,
-                task_id: params.task_id,
-                status: task.status,
-                progress,
-                wait_time_seconds: waitTimeSec,
-                poll_count: pollCount
-              }
-            };
-          }
-
-          // Determine delay: fixed 15s during finalization, otherwise backoff
-          const delayToUse = progress >= 95 ? POLL_FINALIZATION_DELAY : currentDelay;
-
-          await sleep(delayToUse);
-
-          // Increase delay for next iteration (backoff)
-          if (progress < 95) {
-            currentDelay = Math.min(currentDelay * POLL_BACKOFF_FACTOR, POLL_MAX_DELAY);
-          }
+            }],
+            structuredContent: {
+              outcome: "CANCELED" as const,
+              task_id: params.task_id,
+              task_type: result.taskType,
+              status: "CANCELED",
+              progress,
+              wait_time_seconds: waitTimeSec,
+              poll_count: polls
+            }
+          };
         }
-      } catch (error) {
-        const waitTimeSec = Math.round((Date.now() - startTime) / 1000);
+
+        // Out of wait budget. The task itself is not affected.
+        const lastCheck = result.lastError
+          ? `\n**Last status check failed**: ${handleMeshyError(result.lastError)}\n`
+          : "";
         return {
           isError: true,
           content: [{
             type: "text" as const,
-            text: `${handleMeshyError(error)}\n\n**Wait Time**: ${waitTimeSec}s (${pollCount} polls)\n\nYou can retry with \`meshy_get_task_status\` or use wait=false to check manually.`
+            text: `# Still Running
+
+${renderProgressBar(progress)} — ${task?.status ?? "UNKNOWN"} (${waitTimeSec}s, ${polls} polls)
+
+**Task ID**: ${params.task_id}
+**Waited**: ${params.timeout_seconds}s (this call's limit)
+${lastCheck}
+${stillRunning}`
+          }],
+          structuredContent: {
+            outcome: "TIMEOUT" as const,
+            task_id: params.task_id,
+            task_type: result.taskType,
+            status: task?.status ?? "UNKNOWN",
+            progress,
+            wait_time_seconds: waitTimeSec,
+            poll_count: polls
+          }
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [{
+            type: "text" as const,
+            text: `${handleMeshyError(error)}\n\n**Wait Time**: ${elapsed()}s`
           }]
         };
       }
@@ -611,42 +612,9 @@ The task is still processing. You can:
     "meshy_list_tasks",
     {
       title: "List Generation Tasks",
-      description: `List tasks across all task types with filtering and pagination.
+      description: `List tasks of any status, newest first by default, merged across the types queried (one request per type). Default: text-to-3d, image-to-3d, multi-image-to-3d, text-to-image and image-to-image; pass task_type / task_types for printing, rigging, animation, motion, post-processing or Creative Lab tasks. With a task_id in hand, use meshy_get_task_status instead. Tasks created through the API do not appear in the Meshy web app.
 
-Queries one or all task types. When task_type is omitted, queries ALL 7 list-capable endpoints in parallel and merges results sorted by creation time.
-
-Args:
-  - task_type (enum, optional): Filter by task type. If omitted, queries ALL types and merges results.
-    Supported: "text-to-3d", "image-to-3d", "multi-image-to-3d", "remesh", "retexture", "text-to-image", "image-to-image"
-    Note: "rigging" and "animation" do NOT have list endpoints.
-  - sort_by (enum): Sort by creation time - "-created_at" (newest first, default) or "+created_at" (oldest first)
-  - status (enum, optional): Filter by status - "PENDING", "IN_PROGRESS", "SUCCEEDED", "FAILED", "CANCELED"
-  - phase (enum, optional): Filter by phase - "draft", "generate", "texture", "stylize", "animate"
-  - limit (number): Results per page per endpoint, 1-50 (default: 20). When querying all types, total results may be up to 7 × limit.
-  - offset (number): Skip N results for pagination (default: 0)
-  - response_format (enum): Output format - "markdown" or "json" (default: "markdown")
-
-Returns:
-  {
-    "page_count": 20,                  // Tasks in this response
-    "offset": 0,
-    "tasks": [ { task_type: "text-to-3d", ... }, ... ],
-    "has_more": true,
-    "next_offset": 20
-  }
-
-Pagination:
-  To get next page, use the returned next_offset value.
-
-Examples:
-  - List all recent tasks: { limit: 10 }
-  - List only image-to-3d: { task_type: "image-to-3d", limit: 20 }
-  - List successful tasks: { status: "SUCCEEDED", limit: 20 }
-  - Get second page: { limit: 20, offset: 20 }
-
-Error Handling:
-  - Automatically truncates if response exceeds size limit
-  - Partial endpoint failures are tolerated (uses Promise.allSettled)`,
+status and phase filter the fetched tasks, so a page can be shorter than limit; continue with next_offset while has_more. Types whose request failed are listed in failed_types. For finished 3D models only, meshy_list_models is cheaper.`,
       inputSchema: ListTasksInputSchema,
       annotations: {
         readOnlyHint: true,
@@ -657,105 +625,47 @@ Error Handling:
     },
     async (params: z.infer<typeof ListTasksInputSchema>) => {
       try {
-        const pageSize = Math.min(params.limit, 50); // API max is 50
-        const pageNum = Math.floor(params.offset / pageSize) + 1;
-        const baseQueryParams: Record<string, string | number> = {
-          page_size: pageSize,
-          page_num: pageNum,
-          sort_by: params.sort_by
-        };
-
-        if (params.status) baseQueryParams.status = params.status;
-        if (params.phase) baseQueryParams.phase = params.phase;
-
-        // Determine which endpoints to query
-        const taskTypesToQuery: TaskType[] = params.task_type
-          ? [params.task_type]
-          : LIST_CAPABLE_TASK_TYPES;
-
-        // Query endpoints (parallel for multi-type, single for specific type)
-        interface TaggedTask {
-          id: string;
-          name: string;
-          task_type: string;
-          status: string;
-          progress: number;
-          phase: string;
-          created_at: string | number;
-          vertex_count?: number;
-          face_count?: number;
-        }
-
-        let allTasks: TaggedTask[] = [];
-
-        if (taskTypesToQuery.length === 1) {
-          // Single endpoint query
-          const endpoint = getTaskEndpoint(taskTypesToQuery[0]);
-          const tasks = await client.get<Task[]>(endpoint, baseQueryParams);
-          const taskList = Array.isArray(tasks) ? tasks : [];
-          allTasks = taskList.map(task => ({
-            id: task.id,
-            name: task.name || task.prompt || "Untitled",
-            task_type: taskTypesToQuery[0],
-            status: task.status,
-            progress: task.progress,
-            phase: task.phase,
-            created_at: task.created_at,
-            vertex_count: task.vertex_count,
-            face_count: task.face_count
-          }));
-        } else {
-          // Parallel query across all list-capable endpoints
-          const results = await Promise.allSettled(
-            taskTypesToQuery.map(async (tt) => {
-              const endpoint = getTaskEndpoint(tt);
-              const tasks = await client.get<Task[]>(endpoint, baseQueryParams);
-              const taskList = Array.isArray(tasks) ? tasks : [];
-              return taskList.map(task => ({
-                id: task.id,
-                name: task.name || task.prompt || "Untitled",
-                task_type: tt as string,
-                status: task.status,
-                progress: task.progress,
-                phase: task.phase,
-                created_at: task.created_at,
-                vertex_count: task.vertex_count,
-                face_count: task.face_count
-              }));
-            })
-          );
-
-          for (const result of results) {
-            if (result.status === "fulfilled") {
-              allTasks.push(...result.value);
-            }
-            // Rejected results are silently skipped (partial failure tolerance)
-          }
-
-          // Sort merged results by created_at
-          allTasks.sort((a, b) => {
-            const timeA = new Date(a.created_at).getTime();
-            const timeB = new Date(b.created_at).getTime();
-            return params.sort_by === "+created_at" ? timeA - timeB : timeB - timeA;
-          });
-        }
+        const requested = [...new Set([...(params.task_type ? [params.task_type] : []), ...(params.task_types ?? [])])];
+        const taskTypesToQuery: TaskType[] = requested.length > 0 ? requested : DEFAULT_LIST_TASK_TYPES;
+        // The list endpoints take only page_num / page_size / sort_by, so
+        // status and phase are filtered here.
+        const listed = await listAcrossTypes(client, taskTypesToQuery, {
+          sortBy: params.sort_by,
+          offset: params.offset,
+          limit: params.limit,
+          keep: task => (!params.status || task.status === params.status) && (!params.phase || task.phase === params.phase)
+        });
+        const allTasks = listed.items.map(({ task, taskType }) => ({
+          id: task.id,
+          name: task.name || task.prompt || "Untitled",
+          task_type: taskType as string,
+          status: task.status,
+          progress: task.progress,
+          phase: task.phase,
+          created_at: task.created_at,
+          vertex_count: task.vertex_count,
+          face_count: task.face_count
+        }));
 
         const output = {
           page_count: allTasks.length,
           offset: params.offset,
           queried_types: taskTypesToQuery,
+          note: requested.length > 0
+            ? "Only the queried_types were searched."
+            : "Default types only: printing, rigging, animation, motion, post-processing and Creative Lab tasks are not included; pass task_types to list them.",
           tasks: allTasks,
-          has_more: taskTypesToQuery.length === 1 ? allTasks.length >= pageSize : false,
-          next_offset: taskTypesToQuery.length === 1 && allTasks.length >= pageSize
-            ? params.offset + allTasks.length
-            : undefined
+          has_more: listed.hasMore,
+          next_offset: listed.hasMore ? params.offset + allTasks.length : undefined,
+          failed_types: listed.failed.length > 0 ? listed.failed : undefined
         };
 
         // Helper to render tasks as markdown
         const renderTasksMarkdown = (tasks: typeof output.tasks, totalCount: number, truncated = false) => {
           const lines = [`# Tasks`, ""];
-          const typeLabel = params.task_type ? `[${params.task_type}]` : "[all types]";
+          const typeLabel = `[${taskTypesToQuery.join(", ")}]`;
           lines.push(`**Showing**: ${totalCount} tasks ${typeLabel} (offset: ${output.offset})`);
+          lines.push(`*${output.note}*`);
           if (truncated) lines.push(`*(truncated from ${allTasks.length} results)*`);
           lines.push("");
 
@@ -763,7 +673,7 @@ Error Handling:
             const typeTag = taskTypesToQuery.length > 1 ? ` [${task.task_type}]` : "";
             lines.push(`## ${task.name}${typeTag} (${task.id})`);
             lines.push(`- **Status**: ${task.status} ${task.status === TaskStatus.IN_PROGRESS ? `(${task.progress}%)` : ''}`);
-            lines.push(`- **Phase**: ${task.phase}`);
+            if (task.phase) lines.push(`- **Phase**: ${task.phase}`);
             lines.push(`- **Created**: ${new Date(task.created_at).toLocaleString()}`);
             if (task.vertex_count) {
               lines.push(`- **Geometry**: ${task.vertex_count.toLocaleString()} vertices, ${task.face_count?.toLocaleString()} faces`);
@@ -773,6 +683,9 @@ Error Handling:
 
           if (output.has_more) {
             lines.push(`**More results available**. Use offset=${output.next_offset} to see next page.`);
+          }
+          if (output.failed_types) {
+            lines.push(`**Not listed** (request failed): ${output.failed_types.join(", ")}`);
           }
           return lines.join("\n");
         };
@@ -789,6 +702,8 @@ Error Handling:
           const truncatedTasks = output.tasks.slice(0, Math.max(1, Math.floor(output.tasks.length / 2)));
           output.tasks = truncatedTasks;
           output.page_count = truncatedTasks.length;
+          output.has_more = true;
+          output.next_offset = params.offset + truncatedTasks.length;
           if (params.response_format === ResponseFormat.MARKDOWN) {
             textContent = renderTasksMarkdown(truncatedTasks, truncatedTasks.length, true) +
               `\n\n[Response truncated. Use smaller limit or add task_type filter to see more results.]`;
@@ -818,67 +733,89 @@ Error Handling:
   server.registerTool(
     "meshy_cancel_task",
     {
-      title: "Cancel Generation Task",
-      description: `Cancel a pending or in-progress 3D generation task.
+      title: "Cancel or Delete Task",
+      description: `Cancel a queued task, or delete a finished one. What happens depends on the task:
 
-This tool cancels a task that is currently PENDING or IN_PROGRESS. Completed or failed tasks cannot be canceled.
+Creative Lab tasks (task_type "creative-lab-..."):
+  - PENDING → canceled, credits refunded
+  - IN_PROGRESS → canceled, credits NOT refunded
+  - SUCCEEDED / FAILED / CANCELED → cannot be canceled or deleted, even with confirm_delete
 
-Args:
-  - task_id (string): Task ID to cancel (required)
-  - task_type (enum, optional): Task type to route to correct endpoint (default: "text-to-3d"). Auto-infers if wrong.
+Every other task:
+  - PENDING → deleted, credits refunded
+  - IN_PROGRESS → refused: the task keeps running and its credits are not refundable. Wait until it finishes
+  - SUCCEEDED / FAILED / CANCELED → PERMANENTLY deleted with its files, no refund. Requires confirm_delete: true — ask the user first
 
-Returns:
-  {
-    "success": true,
-    "message": "Task canceled successfully",
-    "task_id": "abc-123",
-    "previous_status": "IN_PROGRESS"
-  }
-
-Use Cases:
-  - Cancel tasks that are taking too long
-  - Free up task slots when at limit
-  - Stop incorrect generations
-
-Examples:
-  - Cancel task: { task_id: "abc-123" }
-
-Error Handling:
-  - Returns error if task is already completed
-  - Returns "NotFound" if task doesn't exist`,
+Returns { success, task_id, task_type, previous_status, message }.`,
       inputSchema: CancelTaskInputSchema,
       annotations: {
         readOnlyHint: false,
         destructiveHint: true,
-        idempotentHint: true,
+        idempotentHint: false,
         openWorldHint: true
       }
     },
     async (params: z.infer<typeof CancelTaskInputSchema>) => {
       try {
-        const preferredEndpoint = getTaskEndpoint(params.task_type);
-        const { task, endpoint } = await getTaskWithAutoInference(client, params.task_id, preferredEndpoint);
+        const { task, endpoint, taskType } = await getTaskWithAutoInference(client, params.task_id, params.task_type);
         const previousStatus = task.status;
+        const creativeLab = taskType.startsWith("creative-lab-");
+        const finished = previousStatus === TaskStatus.SUCCEEDED ||
+          previousStatus === TaskStatus.FAILED ||
+          previousStatus === TaskStatus.CANCELED;
 
-        // Cancel the task
+        if (finished && creativeLab) {
+          return {
+            isError: true,
+            content: [{ type: "text", text: `Error: this Creative Lab task is already ${previousStatus}; the API cannot cancel or delete a finished Creative Lab task.` }]
+          };
+        }
+        if (!creativeLab && previousStatus === TaskStatus.IN_PROGRESS) {
+          // The API refuses this with 409 anyway; asking it would delete the task,
+          // unconfirmed, if it finished between the status read and the DELETE.
+          return {
+            isError: true,
+            content: [{
+              type: "text",
+              text: "This task is IN_PROGRESS: a running task cannot be stopped and its credits are already spent. Nothing was changed. " +
+                "Check it with meshy_get_task_status; delete it after it finishes only if the user wants the result gone (confirm_delete: true)."
+            }]
+          };
+        }
+        if (finished && !params.confirm_delete) {
+          return {
+            isError: true,
+            content: [{
+              type: "text",
+              text: `This task is already ${previousStatus}. Deleting it permanently removes the task and its files, with no refund. ` +
+                "Nothing was changed. If the user wants that, call again with confirm_delete: true."
+            }]
+          };
+        }
+
         await client.delete(`${endpoint}/${params.task_id}`);
+
+        const message = creativeLab
+          ? previousStatus === TaskStatus.PENDING
+            ? "Canceled; the credits were refunded."
+            : "Canceled; credits for a task that had already started are not refunded."
+          : finished
+            ? "Deleted permanently, with its files (no refund)."
+            : "Deleted before it started; the credits were refunded.";
 
         const output = {
           success: true,
-          message: "Task canceled successfully",
+          message,
           task_id: params.task_id,
+          task_type: taskType,
           previous_status: previousStatus
         };
 
-        const textContent = `# Task Canceled
-
-**Task ID**: ${params.task_id}
-**Previous Status**: ${previousStatus}
-
-The task has been canceled successfully.`;
-
         return {
-          content: [{ type: "text", text: textContent }],
+          content: [{
+            type: "text",
+            text: `# Task ${creativeLab ? "Canceled" : "Deleted"}\n\n**Task ID**: ${params.task_id}\n**Previous Status**: ${previousStatus}\n\n${message}`
+          }],
           structuredContent: output
         };
       } catch (error) {
@@ -898,36 +835,15 @@ The task has been canceled successfully.`;
     "meshy_download_model",
     {
       title: "Download Model or Image",
-      description: `Download a completed task's output to local disk with automatic file organization.
+      description: `Save a finished task's output under meshy_output/ (project folders with history), or at save_to.
 
-Handles both 3D models and 2D images: 3D tasks save the chosen model \`format\`; image tasks (text-to-image / image-to-image) save the generated PNG/JPG image(s) and ignore \`format\`.
+  - 3D tasks: ONE model format — ask the user which first (GLB viewing, OBJ white-model printing, 3MF multicolor printing, FBX game engines, USDZ AR, BLEND Blender); never download all. A format exists only if it was generated: 3mf needs target_formats ["3mf"] at creation, meshy_convert or meshy_process_multicolor.
+  - Creative Lab: omit format to save every part.
+  - Images and text-to-motion clips save their own files and ignore format.
+  - Rigging and animation tasks are not saved: they return their file URLs.
+If a download fails, its URL is returned instead.
 
-IMPORTANT: For 3D models, ask the user which format they need BEFORE downloading. Do NOT download all formats.
-Format recommendations: GLB (viewing), OBJ (white model printing), 3MF (multicolor printing), FBX (game engines), USDZ (AR).
-
-By default, files are auto-saved to meshy_output/ under the current working directory with smart naming and history tracking. Use save_to to override with a custom path.
-
-Args:
-  - task_id (string): Task ID of completed model (required)
-  - task_type (enum, optional): Task type to route to correct endpoint (default: "text-to-3d"). Auto-infers if wrong.
-  - format (enum): Model format - "glb", "fbx", "usdz", "stl", "obj", "blend", or "3mf" (default: "glb"). IMPORTANT: Ask user which format they need before downloading. NOTE: "3mf" is downloadable only if it was generated — request it via target_formats:["3mf"] at creation, or use meshy_convert / meshy_process_multicolor.
-  - include_textures (boolean): Include texture files (default: true)
-  - save_to (string, optional): Override auto path with a custom ABSOLUTE path. If omitted, auto-saves to meshy_output/{timestamp}_{prompt}_{id}/.
-  - parent_task_id (string, optional): Parent task ID for chaining (e.g., preview_task_id for refine). Places output in the same project folder.
-  - print_ready (boolean, optional): If true and format="obj", auto-fix for 3D printing: Y-up→Z-up, scale to height, center, bottom at Z=0.
-  - print_height_mm (number, optional): Target height in mm when print_ready=true. Default 75. Adjust per user request.
-
-Returns:
-  { "local_path": "/path/to/file.obj", "file_size_bytes": 12345678, "project_dir": "...", "print_fixed": true }
-
-Examples:
-  - Auto-save: { task_id: "abc-123", format: "glb" }
-  - 3D printing: { task_id: "abc-123", format: "obj", print_ready: true, print_height_mm: 100 }
-  - Chained refine: { task_id: "def-456", parent_task_id: "abc-123", format: "glb" }
-
-Error Handling:
-  - Returns error if task is not SUCCEEDED
-  - If download fails, falls back to returning URLs`,
+Example (print): { task_id: "abc-123", format: "obj", print_ready: true, print_height_mm: 100 }`,
       inputSchema: DownloadModelInputSchema,
       annotations: {
         readOnlyHint: false,
@@ -938,8 +854,7 @@ Error Handling:
     },
     async (params: z.infer<typeof DownloadModelInputSchema>) => {
       try {
-        const preferredEndpoint = getTaskEndpoint(params.task_type);
-        const { task } = await getTaskWithAutoInference(client, params.task_id, preferredEndpoint);
+        const { task, taskType } = await getTaskWithAutoInference(client, params.task_id, params.task_type);
 
         if (task.status !== TaskStatus.SUCCEEDED) {
           return {
@@ -954,8 +869,8 @@ Error Handling:
         // Image-generation tasks (text-to-image / image-to-image) return image_urls (PNG/JPG),
         // not model_urls. Download the image(s) directly — the `format` arg is ignored here.
         const isImageTask =
-          params.task_type === TaskType.TEXT_TO_IMAGE ||
-          params.task_type === TaskType.IMAGE_TO_IMAGE ||
+          taskType === TaskType.TEXT_TO_IMAGE ||
+          taskType === TaskType.IMAGE_TO_IMAGE ||
           (!task.model_urls && Array.isArray(task.image_urls) && task.image_urls.length > 0);
         if (isImageTask) {
           const imageUrls = task.image_urls || [];
@@ -984,10 +899,10 @@ Error Handling:
               savedPaths.push(target);
             }
           } else {
-            const stage = inferStage(params.task_type, task.type);
+            const stage = inferStage(taskType, task.type);
             projectDir = resolveProjectDir(
               params.task_id,
-              params.task_type,
+              taskType,
               task.prompt,
               params.parent_task_id,
               task.created_at
@@ -1000,7 +915,7 @@ Error Handling:
             }
             const record: TaskRecord = {
               task_id: params.task_id,
-              task_type: params.task_type,
+              task_type: taskType,
               stage,
               prompt: task.prompt,
               status: task.status,
@@ -1015,7 +930,7 @@ Error Handling:
             local_paths: savedPaths,
             project_dir: projectDir,
             count: savedPaths.length,
-            expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+            expires_at: expiresAt(task)
           };
           const textContent = `# Image(s) Downloaded
 
@@ -1023,51 +938,98 @@ Error Handling:
 **Saved ${savedPaths.length} image(s)**:
 ${savedPaths.map(p => `- ${p}`).join("\n")}${projectDir ? `\n**Project Folder**: ${projectDir}` : ""}
 
-**Note**: Source URLs expire after 24 hours; the local files are permanent.`;
+${expiryNote(task)}`;
           return {
             content: [{ type: "text", text: textContent }],
             structuredContent: output
           };
         }
 
-        let fmt = params.format;
+        const fmt = params.format ?? "glb";
 
-        // Creative Lab build products can expose bespoke multi-part model_urls
-        // (e.g. lamp → base_stl + lamp_stl) that don't match the standard `format` keys.
-        // When the requested format isn't a direct key, download every available part.
+        // Text-to-motion: one clip in result.motion_url (FBX for prime, BVH for swift).
+        if (taskType === TaskType.TEXT_TO_MOTION) {
+          const motionUrl = task.result?.motion_url;
+          if (!motionUrl) {
+            return { isError: true, content: [{ type: "text", text: "Error: Task completed but has no motion clip URL." }] };
+          }
+          const ext = `.${task.result?.motion_format || "fbx"}`;
+          let target = params.save_to;
+          let projectDir: string | undefined;
+          if (!target) {
+            projectDir = resolveProjectDir(params.task_id, taskType, task.prompt, params.parent_task_id, task.created_at);
+            target = path.join(projectDir, `motion${ext}`);
+          }
+          const size = await downloadFileToLocal(motionUrl, target);
+          if (projectDir) {
+            recordTask(projectDir, {
+              task_id: params.task_id,
+              task_type: taskType,
+              stage: "motion",
+              prompt: task.prompt,
+              status: task.status,
+              files: [path.basename(target)],
+              created_at: new Date().toISOString()
+            });
+          }
+          return {
+            content: [{
+              type: "text",
+              text: `# Motion Clip Downloaded
+
+**Task ID**: ${params.task_id}
+**Local File**: ${target}
+**Format**: ${ext.slice(1).toUpperCase()}${projectDir ? `\n**Project Folder**: ${projectDir}` : ""}
+
+${expiryNote(task)}`
+            }],
+            structuredContent: { download_url: motionUrl, local_path: target, project_dir: projectDir, file_size_bytes: size, format: ext.slice(1), expires_at: expiresAt(task) }
+          };
+        }
+
+        // Creative Lab products can expose bespoke multi-part model_urls
+        // (e.g. lamp → lamp_stl + base_stl, zip output → bundle_zip) that don't
+        // match the standard `format` keys. Unless one available format was
+        // asked for, download every available part.
         if (
-          params.task_type.startsWith("creative-lab-") &&
-          params.task_type.endsWith("-build") &&
+          taskType.startsWith("creative-lab-") &&
           task.model_urls &&
-          !task.model_urls[fmt as keyof typeof task.model_urls]
+          !(params.format && task.model_urls[params.format as keyof typeof task.model_urls])
         ) {
           const parts = (Object.entries(task.model_urls) as [string, string][]).filter(([, v]) => Boolean(v));
           if (parts.length > 0) {
             const modelExt = (u: string) => {
-              const m = u.split("?")[0].match(/\.(glb|gltf|obj|mtl|fbx|usdz|stl|3mf|blend)$/i);
+              const m = u.split("?")[0].match(/\.(glb|gltf|obj|mtl|fbx|usdz|stl|3mf|blend|zip)$/i);
               return m ? `.${m[1].toLowerCase()}` : "";
             };
             const clPaths: string[] = [];
+            const notSaved: { part: string; url: string; error: string }[] = [];
+            const saveCreativeLabPart = async (key: string, url: string, target: string) => {
+              try {
+                await downloadFileToLocal(url, target);
+                clPaths.push(target);
+              } catch (error) {
+                notSaved.push({ part: key, url, error: error instanceof Error ? error.message : String(error) });
+              }
+            };
             let clProjectDir: string | undefined;
             if (params.save_to) {
               const dir = path.dirname(params.save_to);
               const stem = path.basename(params.save_to, path.extname(params.save_to));
               for (const [key, url] of parts) {
                 const target = path.join(dir, `${stem}_${key}${modelExt(url)}`);
-                await downloadFileToLocal(url, target);
-                clPaths.push(target);
+                await saveCreativeLabPart(key, url, target);
               }
             } else {
-              const stage = inferStage(params.task_type, task.type);
-              clProjectDir = resolveProjectDir(params.task_id, params.task_type, task.prompt, params.parent_task_id, task.created_at);
+              const stage = inferStage(taskType, task.type);
+              clProjectDir = resolveProjectDir(params.task_id, taskType, task.prompt, params.parent_task_id, task.created_at);
               for (const [key, url] of parts) {
                 const target = path.join(clProjectDir, `${key}${modelExt(url)}`);
-                await downloadFileToLocal(url, target);
-                clPaths.push(target);
+                await saveCreativeLabPart(key, url, target);
               }
               const record: TaskRecord = {
                 task_id: params.task_id,
-                task_type: params.task_type,
+                task_type: taskType,
                 stage,
                 prompt: task.prompt,
                 status: task.status,
@@ -1081,15 +1043,16 @@ ${savedPaths.map(p => `- ${p}`).join("\n")}${projectDir ? `\n**Project Folder**:
               local_paths: clPaths,
               project_dir: clProjectDir,
               count: clPaths.length,
-              expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+              not_saved: notSaved.length > 0 ? notSaved : undefined,
+              expires_at: expiresAt(task)
             };
             const textContent = `# Creative Lab Product Downloaded
 
 **Task ID**: ${params.task_id}
 **Saved ${clPaths.length} file(s)**:
-${clPaths.map(p => `- ${p}`).join("\n")}${clProjectDir ? `\n**Project Folder**: ${clProjectDir}` : ""}
+${clPaths.map(p => `- ${p}`).join("\n")}${clProjectDir ? `\n**Project Folder**: ${clProjectDir}` : ""}${notSaved.length > 0 ? `\n**Not saved** (download these URLs directly):\n${notSaved.map(n => `- ${n.part}: ${n.url} (${n.error})`).join("\n")}` : ""}
 
-**Note**: Source URLs expire after 24 hours; the local files are permanent.`;
+${expiryNote(task)}`;
             return {
               content: [{ type: "text", text: textContent }],
               structuredContent: output
@@ -1120,7 +1083,7 @@ This task did not generate a 3MF file. 3MF is **not** included by default — it
         }
 
         // Rigging tasks: result.rigged_character_{format}_url
-        if (params.task_type === TaskType.RIGGING && task.result) {
+        if (taskType === TaskType.RIGGING && task.result) {
           const lines = [`# Rigging Download URLs`, "", `**Task ID**: ${params.task_id}`, ""];
 
           lines.push("## Rigged Character");
@@ -1142,11 +1105,11 @@ This task did not generate a 3MF file. 3MF is **not** included by default — it
             if (anim.running_fbx_url) lines.push(`- **FBX**: ${anim.running_fbx_url}`);
             if (anim.running_armature_glb_url) lines.push(`- **Armature GLB**: ${anim.running_armature_glb_url}`);
             lines.push("");
-            lines.push("**NOTE**: These animations were included FREE with rigging. Do NOT call `meshy_animate` for walking/running.");
+            lines.push("**NOTE**: These animations were included FREE with rigging; no `meshy_animate` call is needed for them.");
             lines.push("");
           }
 
-          lines.push("**Note**: Download URLs expire after 24 hours.");
+          lines.push(expiryNote(task, false));
 
           const output = {
             download_url: fmt === "fbx"
@@ -1156,7 +1119,7 @@ This task did not generate a 3MF file. 3MF is **not** included by default — it
             rigged_character_glb_url: task.result.rigged_character_glb_url,
             rigged_character_fbx_url: task.result.rigged_character_fbx_url,
             basic_animations: task.result.basic_animations,
-            expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+            expires_at: expiresAt(task)
           };
 
           return {
@@ -1166,7 +1129,7 @@ This task did not generate a 3MF file. 3MF is **not** included by default — it
         }
 
         // Animation tasks: result.animation_{format}_url
-        if (params.task_type === TaskType.ANIMATION && task.result) {
+        if (taskType === TaskType.ANIMATION && task.result) {
           const lines = [`# Animation Download URLs`, "", `**Task ID**: ${params.task_id}`, ""];
 
           lines.push("## Animation Files");
@@ -1176,7 +1139,7 @@ This task did not generate a 3MF file. 3MF is **not** included by default — it
           if (task.result.processed_armature_fbx_url) lines.push(`- **Armature FBX**: ${task.result.processed_armature_fbx_url}`);
           if (task.result.processed_animation_fps_fbx_url) lines.push(`- **FPS-converted FBX**: ${task.result.processed_animation_fps_fbx_url}`);
           lines.push("");
-          lines.push("**Note**: Download URLs expire after 24 hours.");
+          lines.push(expiryNote(task, false));
 
           const output = {
             download_url: fmt === "fbx"
@@ -1188,7 +1151,7 @@ This task did not generate a 3MF file. 3MF is **not** included by default — it
             animation_glb_url: task.result.animation_glb_url,
             animation_fbx_url: task.result.animation_fbx_url,
             processed_usdz_url: task.result.processed_usdz_url,
-            expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+            expires_at: expiresAt(task)
           };
 
           return {
@@ -1232,7 +1195,7 @@ This task did not generate a 3MF file. 3MF is **not** included by default — it
         }
 
         // Determine save path: explicit save_to OR auto-managed output directory
-        const stage = inferStage(params.task_type, task.type);
+        const stage = inferStage(taskType, task.type);
         let savePath: string;
         let projectDir: string | undefined;
 
@@ -1242,7 +1205,7 @@ This task did not generate a 3MF file. 3MF is **not** included by default — it
           // Auto-save to meshy_output/{timestamp}_{prompt}_{id}/
           projectDir = resolveProjectDir(
             params.task_id,
-            params.task_type,
+            taskType,
             task.prompt,
             params.parent_task_id,
             task.created_at
@@ -1301,7 +1264,7 @@ This task did not generate a 3MF file. 3MF is **not** included by default — it
           if (projectDir) {
             const record: TaskRecord = {
               task_id: params.task_id,
-              task_type: params.task_type,
+              task_type: taskType,
               stage,
               prompt: task.prompt,
               status: task.status,
@@ -1320,7 +1283,7 @@ This task did not generate a 3MF file. 3MF is **not** included by default — it
             texture_paths: savedTextures.length > 0 ? savedTextures : undefined,
             vertex_count: task.vertex_count,
             face_count: task.face_count,
-            expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+            expires_at: expiresAt(task)
           };
 
           let textContent = `# Model Downloaded
@@ -1342,7 +1305,7 @@ This task did not generate a 3MF file. 3MF is **not** included by default — it
             textContent += `\n\n## Saved Textures\n${savedTextures.map(t => `- ${t}`).join("\n")}`;
           }
 
-          textContent += `\n\n**Note**: Source URL expires after 24 hours. The local file is permanent.`;
+          textContent += `\n\n${expiryNote(task)}`;
 
           return {
             content: [{ type: "text", text: textContent }],
@@ -1358,7 +1321,7 @@ This task did not generate a 3MF file. 3MF is **not** included by default — it
             texture_urls: textureUrls,
             vertex_count: task.vertex_count,
             face_count: task.face_count,
-            expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+            expires_at: expiresAt(task)
           };
 
           return {
@@ -1371,7 +1334,7 @@ This task did not generate a 3MF file. 3MF is **not** included by default — it
 **Download URL** (use manually):
 ${downloadUrl}
 
-**Note**: Download URLs expire after 24 hours.`
+${expiryNote(task, false)}`
             }],
             structuredContent: output
           };

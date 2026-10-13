@@ -3,6 +3,9 @@ import { test } from "node:test";
 import { registerPostProcessingTools } from "../dist/tools/postprocessing.js";
 import { registerImageTools } from "../dist/tools/image.js";
 import { registerCreativeLabTools } from "../dist/tools/creative-lab.js";
+import { registerPrintingTools } from "../dist/tools/printing.js";
+import { registerConversionTools } from "../dist/tools/conversion.js";
+import { registerGenerationTools } from "../dist/tools/generation.js";
 import { creativeLabCredits, CreativeLabProduct } from "../dist/constants.js";
 
 // Same offline harness as generation.test.mjs, for the other tool groups.
@@ -142,4 +145,45 @@ test("creative lab is image-only and lamp is billed 30 + 6", async () => {
   assert.deepEqual(creativeLabCredits(CreativeLabProduct.LAMP), { prototype: 30, build: 6, total: 36 });
   assert.deepEqual(creativeLabCredits(CreativeLabProduct.KEYCAP), { prototype: 12, build: 50, total: 62 });
   assert.deepEqual(creativeLabCredits(CreativeLabProduct.FIGURE), { prototype: 6, build: 30, total: 36 });
+});
+
+test("print and conversion tools send input_task_id alone when both sources are given", async () => {
+  const both = { input_task_id: "offline", model_url: "https://example.invalid/m.glb" };
+  const printing = createHarness(registerPrintingTools);
+  for (const name of ["meshy_analyze_printability", "meshy_repair_printability", "meshy_process_multicolor"]) {
+    const { body } = await printing.call(name, both);
+    assert.equal(body.input_task_id, "offline", name);
+    assert.equal("model_url" in body, false, name);
+  }
+  const conversion = createHarness(registerConversionTools);
+  for (const [name, extra] of [
+    ["meshy_convert", { target_formats: ["stl"] }],
+    ["meshy_resize", { resize_height: 1 }],
+    ["meshy_uv_unwrap", {}],
+  ]) {
+    const { body } = await conversion.call(name, { ...both, ...extra });
+    assert.equal(body.input_task_id, "offline", name);
+    assert.equal("model_url" in body, false, name);
+  }
+  await createHarness(registerPrintingTools).invalid("meshy_repair_printability", {});
+});
+
+test("image prompts have no length cap", async () => {
+  const { call } = createHarness(registerImageTools);
+  const { body } = await call("meshy_text_to_image", { ai_model: "nano-banana", prompt: "a".repeat(2000) });
+  assert.equal(body.prompt.length, 2000);
+  const { body: one } = await call("meshy_image_to_image", {
+    ai_model: "nano-banana",
+    prompt: "x",
+    reference_image_urls: ["https://example.invalid/a.png"],
+  });
+  assert.equal(one.prompt, "x");
+});
+
+test("multi-image accepts the deprecated model_type but never sends it", async () => {
+  const h = createHarness(registerGenerationTools);
+  const input = { image_urls: ["https://example.invalid/a.png"], model_type: "lowpoly" };
+  assert.equal(h.schema("meshy_multi_image_to_3d").safeParse(input).success, true);
+  const { body } = await h.call("meshy_multi_image_to_3d", input);
+  assert.equal("model_type" in body, false);
 });

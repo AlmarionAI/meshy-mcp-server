@@ -4,13 +4,14 @@
 
 import { z } from "zod";
 import { ResponseFormat, TaskType } from "../constants.js";
+import { toTaskType } from "../utils/endpoints.js";
 
 /**
  * Response format schema
  */
 export const ResponseFormatSchema = z.nativeEnum(ResponseFormat)
   .default(ResponseFormat.MARKDOWN)
-  .describe("Output format: 'markdown' for human-readable or 'json' for machine-readable");
+  .describe("markdown (default) or json");
 
 /**
  * Pagination schema
@@ -21,12 +22,12 @@ export const PaginationSchema = z.object({
     .min(1, "Limit must be at least 1")
     .max(100, "Limit cannot exceed 100")
     .default(20)
-    .describe("Maximum number of results to return"),
+    .describe("Results per page, 1–100"),
   offset: z.number()
     .int()
     .min(0, "Offset cannot be negative")
     .default(0)
-    .describe("Number of results to skip for pagination")
+    .describe("Results to skip")
 });
 
 /**
@@ -34,7 +35,7 @@ export const PaginationSchema = z.object({
  */
 export const TaskIdSchema = z.string()
   .min(1, "Task ID is required")
-  .describe("Unique task identifier (UUID)");
+  .describe("Task ID");
 
 /**
  * URL schema
@@ -44,17 +45,28 @@ export const UrlSchema = z.string()
   .describe("Publicly accessible URL");
 
 /**
- * Prompt schema
+ * Prompt schema for the image endpoints, which set no length limit.
  */
 export const PromptSchema = z.string()
-  .min(2, "Prompt must be at least 2 characters")
-  .max(600, "Prompt must not exceed 600 characters")
+  .min(1, "Prompt is required")
   .describe("Text description");
 
 /**
- * Task type schema
+ * Task type schema. Optional: when it is omitted, unrecognized or wrong, the
+ * server finds the task on the other routes and uses the task's own type.
+ * The API's own spellings (rig, animate, print-multi-color, text-to-3d-preview)
+ * are accepted too.
  */
-export const TaskTypeSchema = z.nativeEnum(TaskType)
-  .default(TaskType.TEXT_TO_3D)
-  .catch(TaskType.TEXT_TO_3D)
-  .describe("Task type for endpoint routing. Common values: 'text-to-3d', 'image-to-3d', 'multi-image-to-3d', 'remesh', 'retexture', 'rigging', 'animation', 'text-to-image', 'image-to-image', 'convert', 'resize', 'uv-unwrap'. Creative Lab is STAGE-specific: 'creative-lab-{product}-prototype' or 'creative-lab-{product}-build' (product = figure/lamp/keychain/fridge-magnet). If omitted or unrecognized, the server auto-infers the correct endpoint by probing — so an imperfect value still resolves; never fall back to manual HTTP.");
+export const TaskTypeSchema = z.preprocess(
+  value => toTaskType(value),
+  z.nativeEnum(TaskType).optional()
+).describe("Optional: if omitted or wrong, the server finds the task and reports its real type.");
+
+/**
+ * Task type filter for listing: takes the same names, API spellings included,
+ * but an unknown value is rejected instead of silently listing other types.
+ */
+export const TaskTypeFilterSchema = z.preprocess(
+  value => toTaskType(value) ?? value,
+  z.nativeEnum(TaskType)
+);

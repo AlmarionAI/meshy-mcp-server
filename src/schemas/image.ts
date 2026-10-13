@@ -6,22 +6,29 @@ import { z } from "zod";
 import { TextToImageModel, AspectRatio, PoseMode } from "../constants.js";
 import { ResponseFormatSchema, PromptSchema, UrlSchema } from "./common.js";
 
+const removeBackground = () => z.boolean()
+  .optional()
+  .describe("Transparent-background PNG (no effect on multi-view output).");
+
+const aspectRatio = () => z.nativeEnum(AspectRatio)
+  .optional()
+  .describe("Default '1:1'; '3:2' and '2:3' are GPT Image models only. Not with generate_multi_view.");
+
 /**
  * Text-to-image input schema
  */
 export const TextToImageInputSchema = z.object({
   ai_model: z.nativeEnum(TextToImageModel)
-    .describe("AI model: 'nano-banana' (3 credits), 'nano-banana-2' (6), 'nano-banana-pro' (9), or a GPT Image model: 'gpt-image-2', 'gpt-image-2-5-flare', 'gpt-image-2-5-sunburst' (9 each)."),
+    .describe("Image model; ask the user."),
   prompt: PromptSchema,
   generate_multi_view: z.boolean()
     .default(false)
-    .describe("Generate multiple viewpoint images (front, side, back). Cannot be combined with aspect_ratio."),
+    .describe("Front/side/back views (input for meshy_multi_image_to_3d). Not with aspect_ratio."),
   pose_mode: z.nativeEnum(PoseMode)
     .optional()
-    .describe("Pose mode for character images: 'a-pose' or 't-pose'"),
-  aspect_ratio: z.nativeEnum(AspectRatio)
-    .optional()
-    .describe("Aspect ratio (API default '1:1'). All models accept '1:1','16:9','9:16','4:3','3:4'; '3:2' and '2:3' are GPT Image models only. Leave unset when generate_multi_view is true."),
+    .describe("Character pose: 'a-pose' or 't-pose'"),
+  aspect_ratio: aspectRatio(),
+  remove_background: removeBackground(),
   response_format: ResponseFormatSchema
 }).strict();
 
@@ -30,20 +37,25 @@ export const TextToImageInputSchema = z.object({
  */
 export const ImageToImageInputSchema = z.object({
   ai_model: z.nativeEnum(TextToImageModel)
-    .describe("AI model: 'nano-banana' (3 credits), 'nano-banana-2' (6), 'nano-banana-pro' (9), or a GPT Image model: 'gpt-image-2', 'gpt-image-2-5-flare', 'gpt-image-2-5-sunburst' (12 each for image-to-image)."),
+    .describe("Image model; ask the user."),
   prompt: PromptSchema,
+  input_task_id: z.string()
+    .optional()
+    .describe("A SUCCEEDED text-to-image / image-to-image task; all its images are the references. Wins over the other sources."),
   reference_image_urls: z.array(z.string())
     .min(1)
     .max(5)
     .optional()
-    .describe("Array of 1–5 publicly accessible reference image URLs. Provide this OR reference_file_paths, not both"),
+    .describe("1–5 public .jpg/.jpeg/.png/.webp URLs"),
   reference_file_paths: z.array(z.string())
     .min(1)
     .max(5)
     .optional()
-    .describe("Array of 1–5 absolute paths to local reference image files. The server reads and encodes them automatically"),
+    .describe("1–5 absolute paths to local images; the server encodes them"),
   generate_multi_view: z.boolean()
     .default(false)
-    .describe("Generate multiple viewpoint images (front, side, back)"),
+    .describe("Front/side/back views (input for meshy_multi_image_to_3d). Not with aspect_ratio."),
+  aspect_ratio: aspectRatio(),
+  remove_background: removeBackground(),
   response_format: ResponseFormatSchema
 }).strict();

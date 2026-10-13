@@ -1,5 +1,140 @@
 # Changelog
 
+## [0.6.3] - 2026-10-13
+
+Sync with the public Meshy API as of 2026-10-12. Tools: 24 → 28.
+
+### Behavior changes
+
+Calls that pass no type now return less than before. Check these when upgrading:
+
+- `meshy_list_tasks` without `task_type` / `task_types` lists only text-to-3d, image-to-3d,
+  multi-image-to-3d, text-to-image and image-to-image tasks (5 requests). It used to query
+  every task type. Pass `task_types` for printing, rigging, animation, motion, post-processing
+  or Creative Lab tasks; the response's `queried_types` and `note` say what was searched
+- `meshy_list_models` without `task_types` lists image-to-3d models. It used to list text-to-3d
+  models only; pass `task_types: ["text-to-3d"]` for that, or several types to combine them
+- `meshy_cancel_task` deletes a finished task only with `confirm_delete: true`
+- `meshy_download_model` on a Creative Lab task without `format` saves every part instead of
+  only the GLB
+
+### Fixed
+
+- **No more duplicate creates.** Every request, task creates included, was retried up to 3 times
+  after a timeout, network error or 5xx, so a create that had already gone through could be sent
+  again and billed again. A create is now never resent after those failures; it retries only a
+  request-rate 429, and a queue-full 429 (`NoMorePendingTasks` / `NoMoreConcurrentTasks`) shows
+  the API's message instead. The error says the task may exist and to check `meshy_list_tasks`
+  first. Reads still retry and honor `Retry-After`. Creates get the recommended 60s timeout
+- **Task lookup returns the task's real shape.** With `task_type` omitted or wrong, a rigging,
+  image or print task came back as text-to-3d, without its rig result, `image_urls` or
+  `printability`, and downloads took the wrong path. The server now reads each task from its own
+  route, probes every task type, and reports the type it found. `task_type` no longer falls back
+  to text-to-3d, and accepts the API's own names (`rig`, `animate`, `print-multi-color`)
+- A failed status check (429, 5xx, timeout) no longer ends `meshy_get_task_status`; it is
+  retried at the next poll, at the API's suggested interval. Running out of wait time says the
+  task keeps running and how to resume. `meshy_creative_lab` waits the same way, and its errors
+  keep the prototype and build task ids
+- Print, convert, resize and UV unwrap tools accept `input_task_id` together with `model_url`
+  (`input_task_id` wins, as the API does) instead of rejecting the call
+- Image prompts are no longer capped at 600 characters; the image endpoints have no limit
+- `meshy_cancel_task` refuses an IN_PROGRESS task itself instead of sending the DELETE, so a
+  task that finishes in the meantime can never be deleted without `confirm_delete`
+- A list response cut short by the size limit now continues right after the last entry it
+  showed; the cut half used to be skipped
+- A Creative Lab part that fails to download is returned as a URL (`not_saved`) while the other
+  parts are still saved; one failed part used to fail the whole call
+- `meshy_multi_image_to_3d` no longer sends `model_type`, which the endpoint ignores; the argument is
+  still accepted (deprecated) so existing calls keep working
+- Error messages follow the HTTP status and keep the API's text: 402 points at
+  `meshy_check_balance`, 409 explains that an in-progress task cannot be deleted yet. Failed
+  tasks show `task_error.type` and `doc_url`, and the advice follows the type
+- `meshy_list_tasks` status and phase filters work (the list endpoints ignore them, so they
+  now filter the fetched page), and the tool reports an error when every endpoint fails
+- Download URLs are reported with the task's own expiry (3 days after it finishes) instead of
+  a made-up 24 hours
+- `meshy_retexture` on `meshy-6-lite` with 4k/8k suggests `meshy-7`, which retexture takes,
+  not `meshy-7.1`
+- `meshy_analyze_printability` no longer says "FDM" when another printer type is requested, and
+  mentions the thin-wall check when a printer type or print size is given
+- Task output no longer prints `Phase: undefined` for tasks that have no phase
+- `meshy_download_model` saves every part of a Creative Lab task (lamp + base STLs, zips,
+  collapsible fidget STL + GLB) unless a `format` is given; `format` no longer silently
+  defaults to `glb` there. Rigging and animation downloads say they return URLs, not files
+- Tool text that led to wrong calls: the white-print flow repairs the OBJ (repair by task
+  outputs GLB, which `print_ready` cannot fix); a textured image-to-3d / multi-image task counts
+  as textured for multi-color, rigging and the game / AR flows; model data URIs are described
+  as GLB only; `meshy_animate` explains bundling walk/run into one file; Auto Split says it has no bed size
+  and `by_color` needs an image-based source; a failed Creative Lab prototype is refunded
+- A 409 no longer suggests deleting the task once it finishes; it says a running task cannot be
+  stopped and that deleting a finished one is permanent and needs `confirm_delete`
+- PrusaSlicer counts as multicolor-capable, matching `printer_brand: "prusa"`
+- `meshy_get_task_status` output schema lists the type-specific results it returns
+  (`printability`, `part_count`, `prompt_ignored`, thumbnails, rigging / animation / motion
+  `result`), so clients that validate structured output accept them
+- `meshy_list_tasks` `task_type` takes the API's names (`rig`, `animate`, `print-multi-color`)
+  like the other task tools, and rejects unknown values. Across several types, `offset` / `limit`
+  page through the merged list (it used to return `limit` tasks per type with no next page), and
+  types whose list request fails are reported in `failed_types`
+
+### Added
+
+- `meshy_auto_split`: cut a model into printable parts (auto, by named parts or by color),
+  with connectors, on-plate layout and extra formats. 10 credits
+- `meshy_text_to_motion`: a motion clip from a description, `prime` (FBX, 10 credits) or `swift`
+  (BVH, 3 credits), 2–10 seconds. Status and download handle the clip
+- `meshy_list_animations`: search the animation library for the action ids `meshy_animate` takes
+- `meshy_list_usage`: finished API tasks with their credits, filterable by time, endpoint and
+  status (Studio and Enterprise teams)
+- `meshy_animate`: `action_ids` (up to 10 clips in one file, 3 credits each) and
+  `motion_task_id` (apply a Text to Motion clip)
+- `meshy_analyze_printability` / `meshy_repair_printability`: `printer_type` and a print size
+  for the wall-thickness check (repair thickens thin walls); repair `alpha_thumbnail`. Repair
+  tasks can be analyzed, and analyze tasks can be repaired
+- `meshy_process_multicolor`: `style` (realistic / cartoon) and `printer_brand` (slicer preset)
+- `meshy_text_to_image` / `meshy_image_to_image`: `remove_background`, and the
+  `nano-banana-2-lite` (3 credits) and `nano-banana-2-1` (4 credits) models
+  (`nano-banana-2-1` is accepted by the API but not yet on its docs' model list). Image-to-image
+  takes `input_task_id` and `aspect_ratio`
+- `meshy_check_balance`: `monthly_credits`, `permanent_credits` and `monthly_resets_at`
+- `meshy_creative_lab`: `fidget-pixel` (36 credits) and `fidget-collapsible` (6 credits, one
+  stage); keychain `name_text` engraving; `build_options` and `output_format` for keychain,
+  fridge-magnet, lamp and fidget-pixel; keycap `vertical_offset_mm`
+- Rigging, animation, Auto Split, Text to Motion and every Creative Lab task can be listed,
+  checked, downloaded (rigging and animation return their file URLs) and canceled
+
+### Changed
+
+- Tool descriptions and server instructions are about a quarter shorter than in 0.6.2, with four
+  more tools: argument lists that repeated the schemas, generic return / error / next-step
+  blocks and repeated examples are gone, every create tool's polling step is stated once in the
+  instructions, and model costs appear once per tool plus the instructions' cost table.
+  Deprecated parameters are still accepted
+- `meshy_list_models` covers every model-producing task type instead of text-to-3d only
+  (image-to-3d by default, one request; `task_types` widens it). Each model carries its
+  `task_type` and downloadable formats. It no longer reads as a list of AI models, and the
+  `filter` / `workspace_id` arguments, which the API never honored, are ignored. Its markdown output no longer
+  prints the long signed thumbnail URLs (still in the JSON output)
+- `meshy_cancel_task` follows the API's DELETE: a PENDING task is refunded, an IN_PROGRESS task
+  cannot be deleted (Creative Lab: canceled without refund), and deleting a finished task, which
+  removes its files, needs `confirm_delete: true`
+- `meshy_remesh` sends only the fields you set (no more `resize_height: 0` and
+  `convert_format_only: false` on every call). Its resize, origin and `convert_format_only`
+  fields are deprecated in favor of `meshy_resize` / `meshy_convert`; it adds `alpha_thumbnail`
+- `meshy_list_tasks` takes up to 100 results per page and can list every task type. Without a
+  type it queries text-to-3d, image-to-3d, multi-image-to-3d, text-to-image and image-to-image
+  (5 requests instead of one per type); `task_types` (merged with `task_type`) adds printing,
+  rigging, animation, motion, post-processing and Creative Lab tasks
+- API key link points to https://www.meshy.ai/developers/keys
+- Server instructions: new cost rows, a rule against re-creating a task after an unclear
+  failure, Text to Motion and the animation library in the animation scenario, and an Auto Split
+  scenario
+
+### Deprecated
+
+- `meshy-t1` is no longer advertised; it is still accepted on single-image generation
+- `symmetry_mode` is described as deprecated on every tool (it has no effect)
+
 ## [0.6.2] - 2026-10-10
 
 ### Removed

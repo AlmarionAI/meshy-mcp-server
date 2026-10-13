@@ -3,6 +3,19 @@
  */
 
 import { ResponseFormat } from "../constants.js";
+import { TaskError } from "../types.js";
+
+/**
+ * One line for a failed task's task_error: "[type/code] message (guide: doc_url)".
+ * `type` decides the retry: timeout / service_unavailable / server_error are
+ * refunded and worth creating again; invalid_input needs a changed input.
+ */
+export function describeTaskError(error?: TaskError): string {
+  if (!error) return "Unknown error";
+  const tag = [error.type, error.code].filter(Boolean).join("/");
+  const guide = error.doc_url ? ` (guide: ${error.doc_url})` : "";
+  return `${tag ? `[${tag}] ` : ""}${error.message || "Unknown error"}${guide}`;
+}
 
 export interface TaskCreatedOutput {
   [x: string]: unknown;

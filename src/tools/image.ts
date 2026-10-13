@@ -26,36 +26,12 @@ export function registerImageTools(server: McpServer, client: MeshyClient) {
     "meshy_text_to_image",
     {
       title: "Generate 2D Image from Text",
-      description: `Generate a 2D image from a text description using Meshy AI.
+      description: `Generate a 2D image from text, e.g. a design for the user to approve before 3D. Typically ~30 s.
+Cost: nano-banana 3, nano-banana-2 6, nano-banana-2-lite 3, nano-banana-2-1 4, nano-banana-pro 9, GPT Image models 9 credits.
 
-Useful for creating reference images that can then be used with image-to-3d or image-to-image.
+To make it 3D: meshy_image_to_3d with input_task_id = this task (multi-view output: meshy_multi_image_to_3d).
 
-Args:
-  - ai_model (enum): "nano-banana" (3 credits), "nano-banana-2" (6), "nano-banana-pro" (9), "gpt-image-2" / "gpt-image-2-5-flare" / "gpt-image-2-5-sunburst" (9) (required)
-  - prompt (string): Text description of the image to generate (2-600 characters, required)
-  - generate_multi_view (boolean, optional): Generate multiple viewpoint images (default: false). Do not combine with aspect_ratio
-  - pose_mode (enum, optional): Pose for character images - "a-pose" or "t-pose"
-  - aspect_ratio (enum, optional): Image aspect ratio (API default: "1:1"). Options: "1:1", "16:9", "9:16", "4:3", "3:4"; "3:2" / "2:3" on GPT Image models only
-  - response_format (enum): Output format - "markdown" or "json" (default: "markdown")
-
-Returns:
-  {
-    "task_id": "abc-123-def",
-    "status": "PENDING",
-    "message": "Image generation task created...",
-    "estimated_time": "~30 seconds"
-  }
-
-Next Steps:
-  Use meshy_get_task_status with task_id and task_type="text-to-image" to check progress.
-
-Examples:
-  - Basic image: { ai_model: "nano-banana", prompt: "a cute cartoon cat" }
-  - Widescreen: { ai_model: "nano-banana-pro", prompt: "fantasy landscape", aspect_ratio: "16:9" }
-  - Multi-view character: { ai_model: "nano-banana-pro", prompt: "game character", generate_multi_view: true }
-
-Error Handling:
-  - Returns "InsufficientCredits" if account needs upgrade`,
+Example: { ai_model: "nano-banana-pro", prompt: "game character", generate_multi_view: true, pose_mode: "t-pose" }`,
       inputSchema: TextToImageInputSchema,
       outputSchema: TaskCreatedOutputSchema,
       annotations: {
@@ -83,8 +59,8 @@ Error Handling:
           generate_multi_view: params.generate_multi_view
         };
         if (params.aspect_ratio) request.aspect_ratio = params.aspect_ratio;
-
         if (params.pose_mode) request.pose_mode = params.pose_mode;
+        if (params.remove_background !== undefined) request.remove_background = params.remove_background;
 
         const response = await client.post<CreateTaskApiResponse>("/openapi/v1/text-to-image", request as unknown as Record<string, unknown>);
         const taskId = response.result;
@@ -120,27 +96,12 @@ Error Handling:
     "meshy_image_to_image",
     {
       title: "Transform Image using AI",
-      description: `Transform images using AI with a text prompt and reference images using Meshy AI.
+      description: `Edit or restyle images with a text prompt. Cost: nano-banana 3, nano-banana-2 6, nano-banana-2-lite 3, nano-banana-2-1 4, nano-banana-pro 9, GPT Image models 12 credits.
+Give exactly ONE reference source: input_task_id (all images of an earlier image task), reference_file_paths (local files; never base64-encode them yourself) or reference_image_urls.
 
-Reference Image Input (provide ONE of these):
-  - reference_image_urls (array): 1–5 publicly accessible reference image URLs
-  - reference_file_paths (array): 1–5 absolute paths to LOCAL image files. Server reads and encodes them automatically.
+To make the result 3D: meshy_image_to_3d with input_task_id = this task (multi-view output: meshy_multi_image_to_3d).
 
-IMPORTANT: For local files, always use reference_file_paths instead of manually base64-encoding.
-
-Other Args:
-  - ai_model (enum): "nano-banana" (3 credits), "nano-banana-2" (6), "nano-banana-pro" (9), "gpt-image-2" / "gpt-image-2-5-flare" / "gpt-image-2-5-sunburst" (12) (required)
-  - prompt (string): Text description guiding the transformation (required)
-  - generate_multi_view (boolean, optional): Generate multiple viewpoint images (default: false)
-  - response_format (enum): Output format (default: "markdown")
-
-Examples:
-  - Local file: { ai_model: "nano-banana", prompt: "make it a robot", reference_file_paths: ["/path/to/image.jpg"] }
-  - Public URL: { ai_model: "nano-banana", prompt: "make it a robot", reference_image_urls: ["https://..."] }
-
-Error Handling:
-  - Returns "InvalidImageUrl" if any reference image is not accessible
-  - Returns "File not found" if any file_path doesn't exist`,
+Example: { ai_model: "nano-banana-2", prompt: "make it red", input_task_id: "abc-123" }`,
       inputSchema: ImageToImageInputSchema,
       outputSchema: TaskCreatedOutputSchema,
       annotations: {
@@ -151,24 +112,31 @@ Error Handling:
       }
     },
     async (params: z.infer<typeof ImageToImageInputSchema>) => {
+      if (params.generate_multi_view && params.aspect_ratio) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: "Error: aspect_ratio cannot be set when generate_multi_view is true. Drop one of them." }]
+        };
+      }
       try {
-        let resolvedUrls: string[];
-        if (params.reference_file_paths && params.reference_file_paths.length > 0) {
-          resolvedUrls = await Promise.all(
-            params.reference_file_paths.map(fp => fileToDataUri(fp))
-          );
-        } else if (params.reference_image_urls && params.reference_image_urls.length > 0) {
-          resolvedUrls = params.reference_image_urls;
-        } else {
-          throw new Error("Either reference_image_urls or reference_file_paths must be provided.");
-        }
-
         const request: ImageToImageApiRequest = {
           ai_model: params.ai_model,
           prompt: params.prompt,
-          reference_image_urls: resolvedUrls,
           generate_multi_view: params.generate_multi_view
         };
+        if (params.input_task_id) {
+          request.input_task_id = params.input_task_id;
+        } else if (params.reference_file_paths && params.reference_file_paths.length > 0) {
+          request.reference_image_urls = await Promise.all(
+            params.reference_file_paths.map(fp => fileToDataUri(fp))
+          );
+        } else if (params.reference_image_urls && params.reference_image_urls.length > 0) {
+          request.reference_image_urls = params.reference_image_urls;
+        } else {
+          throw new Error("Provide input_task_id, reference_image_urls or reference_file_paths.");
+        }
+        if (params.aspect_ratio) request.aspect_ratio = params.aspect_ratio;
+        if (params.remove_background !== undefined) request.remove_background = params.remove_background;
 
         const response = await client.post<CreateTaskApiResponse>("/openapi/v1/image-to-image", request as unknown as Record<string, unknown>);
         const taskId = response.result;
@@ -184,7 +152,9 @@ Error Handling:
           output,
           params.response_format,
           "Image-to-Image Task Created",
-          `Transforming ${resolvedUrls.length} reference image(s) with AI.`,
+          params.input_task_id
+            ? `Transforming the output image(s) of task "${params.input_task_id}".`
+            : `Transforming ${request.reference_image_urls?.length ?? 0} reference image(s) with AI.`,
           "image-to-image"
         );
       } catch (error) {

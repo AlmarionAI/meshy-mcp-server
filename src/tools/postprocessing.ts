@@ -1,5 +1,5 @@
 /**
- * Post-processing tools (remesh, retexture, rig, animate)
+ * Post-processing tools (remesh, retexture, rig, animate, text-to-motion, animation library)
  */
 
 import { z } from "zod";
@@ -10,19 +10,28 @@ import {
   RemeshInputSchema,
   RetextureInputSchema,
   RigInputSchema,
-  AnimateInputSchema
+  AnimateInputSchema,
+  TextToMotionInputSchema,
+  ListAnimationsInputSchema
 } from "../schemas/postprocessing.js";
 import { TaskCreatedOutputSchema } from "../schemas/output.js";
-import { ResponseFormat, RIGGING_MAX_FACES } from "../constants.js";
+import {
+  ANIMATE_CREDITS_PER_ACTION,
+  CHARACTER_LIMIT,
+  ResponseFormat,
+  RIGGING_MAX_FACES,
+  TEXT_TO_MOTION_CREDITS
+} from "../constants.js";
 import { formatTaskCreatedResponse } from "../utils/response-formatter.js";
 import { checkTextureResolution } from "../utils/generation-options.js";
-import { fetchTaskByIdFromKnownEndpoints } from "../services/meshy-client.js";
+import { getTaskWithAutoInference } from "../services/meshy-client.js";
+import { buildApiRequest } from "../utils/request-builder.js";
 import {
   CreateTaskApiResponse,
-  RemeshApiRequest,
   RetextureApiRequest,
   RigApiRequest,
-  AnimateApiRequest
+  AnimateApiRequest,
+  LibraryAnimation
 } from "../types.js";
 
 /**
@@ -33,41 +42,10 @@ export function registerPostProcessingTools(server: McpServer, client: MeshyClie
   server.registerTool(
     "meshy_remesh",
     {
-      title: "Remesh or Convert 3D Model",
-      description: `Remesh an existing 3D model or convert it to different formats using Meshy AI.
+      title: "Remesh 3D Model",
+      description: `Remesh an existing model: change its polygon count or topology. Cost: 5 credits. For a format change only use meshy_convert (1 credit); to scale, meshy_resize (1 credit).
 
-Use this to optimize polygon count, change topology, convert formats, or reposition model origin.
-
-Args:
-  - input_task_id (string, optional): Task ID of an existing completed task to remesh
-  - model_url (string, optional): Direct URL to a model file to remesh
-    (Provide either input_task_id or model_url)
-  - target_formats (array, optional): Output formats to generate (default: ["glb"]). Options: "glb", "fbx", "obj", "usdz", "blend", "stl"
-  - topology (enum, optional): Mesh topology - "quad" or "triangle"
-  - target_polycount (number, optional): Target polygon count (100–300,000)
-  - resize_height (number, optional): Resize model height in meters (0 = no resize, default: 0)
-  - origin_at (enum, optional): Model origin placement - "bottom" or "center"
-  - convert_format_only (boolean, optional): Only convert format without remeshing (default: false)
-  - response_format (enum): Output format - "markdown" or "json" (default: "markdown")
-
-Returns:
-  {
-    "task_id": "abc-123-def",
-    "status": "PENDING",
-    "message": "Remesh task created...",
-    "estimated_time": "1-2 minutes"
-  }
-
-Next Steps:
-  Use meshy_get_task_status with task_id and task_type="remesh" to check progress.
-
-Examples:
-  - Remesh by task: { input_task_id: "abc-123", target_polycount: 10000 }
-  - Convert format: { model_url: "https://...", target_formats: ["fbx", "obj"], convert_format_only: true }
-
-Error Handling:
-  - Returns "NotFound" if input_task_id doesn't exist
-  - Returns "InvalidModel" if model_url is not accessible`,
+Example: { input_task_id: "abc-123", topology: "quad", target_polycount: 10000, target_formats: ["fbx"] }`,
       inputSchema: RemeshInputSchema,
       outputSchema: TaskCreatedOutputSchema,
       annotations: {
@@ -89,22 +67,9 @@ Error Handling:
           };
         }
 
-        const request: RemeshApiRequest = {
-          target_formats: params.target_formats,
-          resize_height: params.resize_height,
-          convert_format_only: params.convert_format_only
-        };
-
-        if (params.input_task_id) request.input_task_id = params.input_task_id;
-        if (params.model_url) request.model_url = params.model_url;
-        if (params.topology) request.topology = params.topology;
-        if (params.target_polycount) request.target_polycount = params.target_polycount;
-        if (params.origin_at) request.origin_at = params.origin_at;
-        if (params.resize_longest_side !== undefined) request.resize_longest_side = params.resize_longest_side;
-        if (params.decimation_mode !== undefined) request.decimation_mode = params.decimation_mode;
-        if (params.auto_size !== undefined) request.auto_size = params.auto_size;
-
-        const response = await client.post<CreateTaskApiResponse>("/openapi/v1/remesh", request as unknown as Record<string, unknown>);
+        // Only fields the caller set; the deprecated resize / convert fields
+        // are no longer sent with placeholder values.
+        const response = await client.post<CreateTaskApiResponse>("/openapi/v1/remesh", buildApiRequest({}, params));
         const taskId = response.result;
 
         const output = {
@@ -138,49 +103,14 @@ Error Handling:
     "meshy_retexture",
     {
       title: "Retexture 3D Model",
-      description: `Apply new AI-generated textures to an existing 3D model using Meshy AI.
+      description: `Apply new AI textures to an existing model. Cost: 10 credits (15 at 8K).
 
-IMPORTANT: Before calling this tool, ask the user to provide EXACTLY ONE style input:
-  - text_style_prompt: A text description of the desired texture style (e.g. "rusty metal", "cartoon style")
-  - image_style_url: A single reference image URL for the texture STYLE
-  - multiview_image_urls: 1-4 photos OF THE SAME OBJECT from different angles (not style refs)
-One of these is REQUIRED; pass only one (the tool rejects combinations).
+Ask the user for EXACTLY ONE style input (the tool rejects combinations):
+  - text_style_prompt: the style in words ("rusty metal", "cartoon")
+  - image_style_url: one image used as a STYLE reference
+  - multiview_image_urls: 1–4 photos OF THE SAME OBJECT from different angles (not style references)
 
-Args:
-  - input_task_id (string, optional): Task ID of an existing completed task to retexture
-  - model_url (string, optional): Direct URL to a model file to retexture
-    (Provide either input_task_id or model_url)
-  - text_style_prompt (string): Text prompt describing the desired texture style. Max 800 characters.
-  - image_style_url (string): URL of an image to use as texture style reference.
-  - multiview_image_urls (string[]): 1-4 ordered views of the SAME object; element 0 is the primary
-    reference and alone drives metallic/roughness prediction. Runs on Meshy 7 ("latest" is sent as "meshy-7").
-  - ai_model (enum): "latest" (default, = Meshy 7), "meshy-7", "meshy-6", or "meshy-6-lite" (2K textures only). No meshy-7.1 here. Ask user which model before proceeding
-  - enable_original_uv (boolean, optional): Keep existing UVs instead of a fresh unwrap. Default: true with input_task_id, API default (false) with model_url
-  - enable_pbr (boolean): Enable PBR textures (default: false)
-  - texture_resolution (enum, optional): "2k" (default), "4k", or "8k". 8K costs 15 credits instead of 10 — confirm with the user. Replaces the deprecated hd_texture flag.
-  - remove_lighting (boolean, optional): Remove highlights/shadows from base color texture. Only honored on meshy-6
-  - target_formats (string[], optional): Output formats. 3MF must be explicitly included if needed.
-  - response_format (enum): Output format - "markdown" or "json" (default: "markdown")
-
-Returns:
-  {
-    "task_id": "abc-123-def",
-    "status": "PENDING",
-    "message": "Retexture task created...",
-    "estimated_time": "2-3 minutes"
-  }
-
-Next Steps:
-  Use meshy_get_task_status with task_id and task_type="retexture" to check progress.
-
-Examples:
-  - Text style: { input_task_id: "abc-123", text_style_prompt: "rusty metal" }
-  - Image style: { model_url: "https://...", image_style_url: "https://style-ref.jpg" }
-  - Multi-view: { input_task_id: "abc-123", ai_model: "meshy-7", multiview_image_urls: ["https://front.jpg", "https://side.jpg"] }
-
-Error Handling:
-  - Returns "NotFound" if input_task_id doesn't exist
-  - Returns error if no style input is provided, or if more than one is provided`,
+Example: { input_task_id: "abc-123", text_style_prompt: "rusty metal" }`,
       inputSchema: RetextureInputSchema,
       outputSchema: TaskCreatedOutputSchema,
       annotations: {
@@ -247,7 +177,7 @@ Error Handling:
             };
           }
         }
-        checkTextureResolution(aiModel, params.texture_resolution, params.hd_texture);
+        checkTextureResolution(aiModel, params.texture_resolution, params.hd_texture, "meshy-6, meshy-7 or latest");
 
         const request: RetextureApiRequest = {
           enable_pbr: params.enable_pbr
@@ -304,43 +234,11 @@ Error Handling:
     "meshy_rig",
     {
       title: "Auto-Rig 3D Character",
-      description: `Automatically rig a 3D character model for animation using Meshy AI.
+      description: `Auto-rig a humanoid character for animation. Cost: 5 credits, including free walking + running animations (GLB + FBX, separate files).
 
-Creates a skeletal rig for character models, enabling them to be animated. Rigging INCLUDES free walking + running animations.
+REQUIREMENT: a textured humanoid (biped) model with a clear body and limbs, ≤300,000 faces (checked first; remesh if over). model_url must be a .glb facing +Z. Generate characters with pose_mode "t-pose" for the best rig.
 
-IMPORTANT: The source model should be generated with pose_mode="t-pose" for best rigging results. When the user asks to rig or animate, always ensure the generation step used t-pose. If the model was not generated with t-pose, recommend regenerating with pose_mode="t-pose" first.
-
-CONSTRAINT: Model must have ≤300,000 faces. This tool auto-checks and suggests remeshing if exceeded.
-
-Args:
-  - input_task_id (string, optional): Task ID of an existing completed task to rig
-  - model_url (string, optional): Direct URL to a model file to rig
-    (Provide either input_task_id or model_url)
-  - height_meters (number, optional): Height of the character in meters (default: 1.7)
-  - texture_image_url (string, optional): URL of a texture image to apply to the model
-  - response_format (enum): Output format - "markdown" or "json" (default: "markdown")
-
-Returns:
-  {
-    "task_id": "abc-123-def",
-    "status": "PENDING",
-    "message": "Rigging task created...",
-    "estimated_time": "2-3 minutes"
-  }
-
-Included with rigging (FREE):
-  - Walking animation (GLB + FBX)
-  - Running animation (GLB + FBX)
-  Only call meshy_animate (3 credits) for CUSTOM animations beyond walking/running.
-
-Examples:
-  - Basic rig: { input_task_id: "abc-123" }
-  - With height: { model_url: "https://...", height_meters: 1.8 }
-
-Error Handling:
-  - Returns "NotFound" if input_task_id doesn't exist
-  - Returns error if model exceeds 300K faces (suggests remeshing)
-  - Returns error if model is not suitable for rigging`,
+Next steps: meshy_download_model (task_type "rigging") returns the rigged model and walk/run URLs. Other actions: meshy_list_animations → meshy_animate. A described motion: meshy_text_to_motion → meshy_animate with motion_task_id.`,
       inputSchema: RigInputSchema,
       outputSchema: TaskCreatedOutputSchema,
       annotations: {
@@ -365,8 +263,7 @@ Error Handling:
         // Pre-validate face count for rigging constraint
         if (params.input_task_id) {
           try {
-            const result = await fetchTaskByIdFromKnownEndpoints(client, params.input_task_id);
-            const sourceTask = result?.task;
+            const { task: sourceTask } = await getTaskWithAutoInference(client, params.input_task_id);
             if (sourceTask?.face_count && sourceTask.face_count > RIGGING_MAX_FACES) {
               const faceCount = sourceTask.face_count.toLocaleString();
               const maxFaces = RIGGING_MAX_FACES.toLocaleString();
@@ -414,7 +311,7 @@ The model exceeds the ${maxFaces}-face limit for rigging.
           output,
           params.response_format,
           "Rigging Task Created",
-          `Rigging INCLUDES walking + running animations for free. Download with \`meshy_download_model\` (task_type "rigging").\nOnly call \`meshy_animate\` (3 credits) for CUSTOM animations beyond walking/running.`,
+          `Rigging INCLUDES walking + running animations for free, as separate files. \`meshy_download_model\` (task_type "rigging") returns their URLs.\n\`meshy_animate\` (3 credits per action) is for other actions, or walk/run bundled into one multi-clip file.`,
           "rigging"
         );
       } catch (error) {
@@ -434,38 +331,11 @@ The model exceeds the ${maxFaces}-face limit for rigging.
     "meshy_animate",
     {
       title: "Animate Rigged 3D Character",
-      description: `Apply a CUSTOM animation to a rigged 3D character using Meshy AI. Cost: 3 credits.
+      description: `Animate a rigged character (rig_task_id). Cost: 3 credits per action. Give exactly ONE of action_id, action_ids or motion_task_id.
 
-NOTE: Walking and running animations are already FREE with meshy_rig. Only use this tool for CUSTOM animations (dancing, jumping, fighting, etc.) that are NOT included in rigging.
+meshy_rig already returns walking and running free, as separate files; include their ids in action_ids only to bundle them into one multi-clip file. meshy_download_model (task_type "animation") returns the file URLs.
 
-Applies a predefined animation action to a character that has been rigged with meshy_rig.
-
-Args:
-  - rig_task_id (string): Task ID of the completed rigging task (required)
-  - action_id (number): Integer ID of the animation action to apply (required)
-  - post_process (object, optional): Optional post-processing to apply after animation:
-    - operation_type (enum): "change_fps", "fbx2usdz", or "extract_armature"
-    - fps (number, optional): Target FPS for change_fps operation (24, 25, 30, or 60)
-  - response_format (enum): Output format - "markdown" or "json" (default: "markdown")
-
-Returns:
-  {
-    "task_id": "abc-123-def",
-    "status": "PENDING",
-    "message": "Animation task created...",
-    "estimated_time": "1-2 minutes"
-  }
-
-Next Steps:
-  Use meshy_get_task_status with task_id and task_type="animation" to check progress.
-
-Examples:
-  - Basic animate: { rig_task_id: "abc-123", action_id: 1 }
-  - With FPS change: { rig_task_id: "abc-123", action_id: 1, post_process: { operation_type: "change_fps", fps: 30 } }
-
-Error Handling:
-  - Returns "NotFound" if rig_task_id doesn't exist
-  - Returns error if rig task is not yet completed`,
+Example: { rig_task_id: "abc-123", action_ids: [1, 4, 92] }`,
       inputSchema: AnimateInputSchema,
       outputSchema: TaskCreatedOutputSchema,
       annotations: {
@@ -476,11 +346,18 @@ Error Handling:
       }
     },
     async (params: z.infer<typeof AnimateInputSchema>) => {
-      try {
-        const request: AnimateApiRequest = {
-          rig_task_id: params.rig_task_id,
-          action_id: params.action_id
+      const sources = [params.action_id !== undefined, params.action_ids !== undefined, params.motion_task_id !== undefined];
+      if (sources.filter(Boolean).length !== 1) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: "Error: give exactly one of action_id, action_ids or motion_task_id." }]
         };
+      }
+      try {
+        const request: AnimateApiRequest = { rig_task_id: params.rig_task_id };
+        if (params.action_id !== undefined) request.action_id = params.action_id;
+        if (params.action_ids) request.action_ids = params.action_ids;
+        if (params.motion_task_id) request.motion_task_id = params.motion_task_id;
 
         if (params.post_process) {
           request.post_process = params.post_process;
@@ -500,7 +377,11 @@ Error Handling:
           output,
           params.response_format,
           "Animation Task Created",
-          "Applying custom animation to the rigged character.",
+          params.action_ids
+            ? `Applying ${params.action_ids.length} actions as clips in one file (${params.action_ids.length * ANIMATE_CREDITS_PER_ACTION} credits).`
+            : params.motion_task_id
+              ? `Applying the motion clip of task "${params.motion_task_id}" to the rigged character.`
+              : "Applying custom animation to the rigged character.",
           "animation"
         );
       } catch (error) {
@@ -510,6 +391,110 @@ Error Handling:
             type: "text",
             text: handleMeshyError(error)
           }]
+        };
+      }
+    }
+  );
+
+  // Text-to-motion tool
+  server.registerTool(
+    "meshy_text_to_motion",
+    {
+      title: "Generate Motion Clip from Text",
+      description: `Generate a character motion clip (skeleton motion, not a model) from text. Cost: ${TEXT_TO_MOTION_CREDITS.prime} credits (prime) or ${TEXT_TO_MOTION_CREDITS.swift} (swift) — confirm first. Clips are kept for 3 days.
+
+Apply it to a rigged biped with meshy_animate (motion_task_id), or save the clip with meshy_download_model (FBX for prime, BVH for swift; format is ignored).
+
+Example: { prompt: "a boxer throws a jab-cross combo", duration: 4 }`,
+      inputSchema: TextToMotionInputSchema,
+      outputSchema: TaskCreatedOutputSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      }
+    },
+    async (params: z.infer<typeof TextToMotionInputSchema>) => {
+      try {
+        const request: Record<string, unknown> = { prompt: params.prompt, duration: params.duration };
+        if (params.mode) request.mode = params.mode;
+        const response = await client.post<CreateTaskApiResponse>("/openapi/v1/text-to-motion", request);
+        const taskId = response.result;
+        const mode = params.mode ?? "prime";
+        return formatTaskCreatedResponse(
+          {
+            task_id: taskId,
+            status: "PENDING",
+            message: `Text-to-motion task created (${mode}, ${TEXT_TO_MOTION_CREDITS[mode]} credits). Task ID: ${taskId}`,
+            estimated_time: "10-30 seconds"
+          },
+          params.response_format,
+          "Text-to-Motion Task Created",
+          `Generating a ${params.duration}s ${mode === "prime" ? "FBX" : "BVH"} motion clip: "${params.prompt}"`,
+          "text-to-motion"
+        );
+      } catch (error) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: handleMeshyError(error) }]
+        };
+      }
+    }
+  );
+
+  // Animation library lookup
+  server.registerTool(
+    "meshy_list_animations",
+    {
+      title: "Find Animation Actions",
+      description: `Look up preset animations: the action ids meshy_animate takes. Free. Filters combine; with none the whole (long) library comes back, so prefer search or category.
+
+Returns [{ action_id, name, key, category, sub_category, preview_url }]; preview_url is an animated GIF.`,
+      inputSchema: ListAnimationsInputSchema,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true
+      }
+    },
+    async (params: z.infer<typeof ListAnimationsInputSchema>) => {
+      try {
+        const query: Record<string, unknown> = {};
+        if (params.search) query.search = params.search;
+        if (params.category) query.category = params.category;
+        if (params.sub_category) query.sub_category = params.sub_category;
+        if (params.action_ids) query.action_ids = params.action_ids.join(",");
+
+        const data = await client.get<LibraryAnimation[]>("/openapi/v1/animations/library", query);
+        const animations = Array.isArray(data) ? data : [];
+
+        let textContent: string;
+        if (params.response_format === ResponseFormat.MARKDOWN) {
+          textContent = [
+            `# Animation Library (${animations.length} match${animations.length === 1 ? "" : "es"})`,
+            "",
+            "| action_id | Name | Category / Sub-category | Preview |",
+            "|---|---|---|---|",
+            ...animations.map(a => `| ${a.action_id} | ${a.name} | ${a.category} / ${a.sub_category} | ${a.preview_url} |`)
+          ].join("\n");
+        } else {
+          textContent = JSON.stringify(animations, null, 2);
+        }
+        if (textContent.length > CHARACTER_LIMIT) {
+          textContent = textContent.slice(0, CHARACTER_LIMIT) +
+            "\n\n[Truncated: narrow the result with search, category or sub_category.]";
+        }
+
+        return {
+          content: [{ type: "text", text: textContent }],
+          structuredContent: { count: animations.length, animations }
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: handleMeshyError(error) }]
         };
       }
     }

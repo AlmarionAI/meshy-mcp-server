@@ -3,7 +3,7 @@
  */
 
 import { AxiosError } from "axios";
-import { ErrorCode } from "../constants.js";
+import { MAX_RETRIES, MAX_RETRY_AFTER_MS, RETRY_DELAYS } from "../constants.js";
 import { RequestValidationError } from "../utils/generation-options.js";
 
 export interface MeshyError {
@@ -37,11 +37,11 @@ export class MeshyAuthError extends Error {
 export const MISSING_API_KEY_MESSAGE =
   "MESHY_API_KEY environment variable is required. Put it in the \"env\" block of your " +
   "MCP client config (not in \"args\"), then restart the Meshy MCP server. " +
-  "Get your API key from https://www.meshy.ai/settings/api";
+  "Get your API key from https://www.meshy.ai/developers/keys";
 
 export const INVALID_API_KEY_MESSAGE =
   "Authentication failed: the Meshy API rejected MESHY_API_KEY (401). The key is mistyped, " +
-  "revoked or expired. Create a new key at https://www.meshy.ai/settings/api, update the " +
+  "revoked or expired. Create a new key at https://www.meshy.ai/developers/keys, update the " +
   "MCP client config, then restart the Meshy MCP server.";
 
 /**
@@ -58,35 +58,6 @@ export function handleMeshyError(error: unknown, context?: ErrorContext): string
     if (error.response) {
       const status = error.response.status;
       const errorData = error.response.data as any;
-      const errorCode = errorData?.error_code || errorData?.code;
-
-      // Map specific error codes
-      switch (errorCode) {
-        case ErrorCode.INSUFFICIENT_CREDITS:
-          return "Error: Insufficient credits. Use `meshy_check_balance` to check your balance. Upgrade at https://meshy.ai/pricing";
-
-        case ErrorCode.TOO_MANY_PENDING_TASKS:
-          return "Error: Too many pending tasks. Please wait for current tasks to complete or cancel some tasks.";
-
-        case ErrorCode.INVALID_MODEL_NOT_SUPPORTED:
-          return "Error: Model format not supported. Supported formats: GLB, FBX, USDZ, 3MF";
-
-        case ErrorCode.INVALID_MODEL_INVALID_FORMAT:
-          return "Error: Model file is corrupted or invalid. Please try generating again.";
-
-        case ErrorCode.LIMIT_EXCEEDED:
-          return "Error: Rate limit exceeded. Please wait a moment before making more requests.";
-
-        case ErrorCode.FORBIDDEN:
-          return "Error: Permission denied. Please check your API key has the required permissions.";
-
-        case ErrorCode.NOT_FOUND:
-          return "Error: Resource not found. Please verify the task ID is correct.";
-
-        case ErrorCode.INTERNAL_ERROR:
-          return "Error: Meshy service error. Please try again later.";
-      }
-
       const tool = context?.tool;
 
       // Handle HTTP status codes
@@ -102,8 +73,17 @@ export function handleMeshyError(error: unknown, context?: ErrorContext): string
         case 401:
           return `Error: ${INVALID_API_KEY_MESSAGE}`;
 
-        case 403:
-          return "Error: Permission denied. Your API key may not have access to this resource.";
+        case 402:
+          return `Error: Payment required (402). ${errorData?.message || "Insufficient credits."} ` +
+            "Check the balance with `meshy_check_balance`; add credits or upgrade at https://www.meshy.ai/pricing.";
+
+        case 403: {
+          const hint = tool === "meshy_list_usage"
+            ? " The Usage API is available only to API keys on a Studio or Enterprise team."
+            : "";
+          const detail = String(errorData?.message || "Your API key may not have access to this resource.").replace(/\.?$/, ".");
+          return `Error: Permission denied (403). ${detail}${hint}`;
+        }
 
         case 404: {
           if (tool === "meshy_uv_unwrap") {
@@ -112,25 +92,34 @@ export function handleMeshyError(error: unknown, context?: ErrorContext): string
           if (tool === "meshy_creative_lab") {
             return "Error: Creative Lab resource not found. The product may not be available for your account/plan, or the task expired — verify the product and try again, or contact Meshy support.";
           }
-          return "Error: Resource not found. Please check the ID is correct.";
+          return `Error: Not found (404). ${errorData?.message || "Check that the ID is correct."}`;
         }
 
+        case 409:
+          // e.g. DELETE of a task that is already IN_PROGRESS.
+          return `Error: Conflict (409). ${String(errorData?.message || "The task's current state does not allow this operation.").replace(/\.?$/, ".")} ` +
+            "A running task cannot be stopped and its credits are already spent. Once it finishes, delete it only " +
+            "if the user wants the result gone (permanent, no refund, needs confirm_delete: true).";
+
         case 429:
-          return "Error: Rate limit exceeded. Please wait before making more requests.";
+          if (isQueueFullError(error)) {
+            return `Error: Your task queue is full. ${errorData.message} Wait for one of your running tasks to finish before creating another (\`meshy_list_tasks\` with status IN_PROGRESS; its default covers generation and image tasks only, so pass task_types for printing, rigging, animation, motion, post-processing or Creative Lab tasks); retrying right away will not help.`;
+          }
+          return `Error: Rate limit exceeded (429). ${errorData?.message || ""} Wait a few seconds and try again.`;
 
         case 500:
         case 502:
         case 503:
-          return "Error: Meshy service is temporarily unavailable. Please try again later.";
+          return `Error: Meshy service is temporarily unavailable (${status}).${createNote(error)}`;
 
         default:
-          return `Error: API request failed with status ${status}. ${errorData?.message || ""}`;
+          return `Error: API request failed with status ${status}. ${errorData?.message || ""}${createNote(error)}`;
       }
     }
 
     // Handle network errors
-    if (error.code === "ECONNABORTED") {
-      return "Error: Request timed out. Please check your network connection and try again.";
+    if (error.code === "ECONNABORTED" || error.code === "ETIMEDOUT") {
+      return `Error: Request timed out.${createNote(error) || " Check your network connection and try again."}`;
     }
 
     if (error.code === "ENOTFOUND") {
@@ -141,7 +130,7 @@ export function handleMeshyError(error: unknown, context?: ErrorContext): string
       return "Error: Meshy API is unavailable. Please try again later.";
     }
 
-    return `Error: Network error occurred. ${error.message}`;
+    return `Error: Network error occurred. ${error.message}${createNote(error)}`;
   }
 
   // Handle generic errors
@@ -157,6 +146,13 @@ export function handleMeshyError(error: unknown, context?: ErrorContext): string
 
   // Append context-aware suggestions if context is provided
   return appendContextSuggestions(baseMessage, error, context);
+}
+
+/** After an ambiguous create failure: tell the agent to look before it resends. */
+function createNote(error: AxiosError): string {
+  if (!createOutcomeUnknown(error)) return "";
+  return " This create request was not retried automatically: it may still have created (and charged) the task. " +
+    "Check `meshy_list_tasks` (with this task's task_type) for a new task before calling this tool again.";
 }
 
 /**
@@ -180,7 +176,7 @@ function appendContextSuggestions(message: string, error: unknown, context?: Err
 
   // Multi-color + missing texture
   if (tool === "meshy_process_multicolor" && (errorText.includes("texture") || errorText.includes("input") || errorText.includes("task"))) {
-    return message + `\n\n**Fix**: The input model must have textures. Run \`meshy_text_to_3d_refine\` or \`meshy_retexture\` first to add textures, then use the resulting task ID as input_task_id.`;
+    return message + `\n\n**Fix**: The input model must have textures: use a textured image-to-3d / multi-image-to-3d task, or texture the model first with \`meshy_text_to_3d_refine\` or \`meshy_retexture\`, then pass that task ID as input_task_id.`;
   }
 
   // Insufficient credits — extra hint for the 10-credit print operations
@@ -199,31 +195,77 @@ function appendContextSuggestions(message: string, error: unknown, context?: Err
   return message;
 }
 
-/**
- * Check if error is a rate limit error
- */
-export function isRateLimitError(error: unknown): boolean {
-  if (error instanceof AxiosError) {
-    return error.response?.status === 429;
-  }
-  return false;
+function responseMessage(error: AxiosError): string {
+  const data = error.response?.data as { message?: unknown } | undefined;
+  return typeof data?.message === "string" ? data.message : "";
 }
 
 /**
- * Check if error is a network error that should be retried
+ * A queue-full 429 (`NoMorePendingTasks`, or `NoMoreConcurrentTasks` when the
+ * credits ran out): the account already runs its maximum of unfinished tasks.
+ * It carries no Retry-After; only a task finishing frees a slot.
  */
-export function isRetryableError(error: unknown): boolean {
-  if (error instanceof AxiosError) {
-    // Retry on network errors
-    if (!error.response) {
-      return true;
-    }
+export function isQueueFullError(error: unknown): boolean {
+  return error instanceof AxiosError &&
+    error.response?.status === 429 &&
+    /^NoMore(Pending|Concurrent)Tasks/.test(responseMessage(error));
+}
 
-    // Retry on 5xx server errors
-    const status = error.response.status;
-    return status >= 500 && status < 600;
-  }
-  return false;
+/** A Retry-After header value (delta-seconds, as the API sends it) in ms. */
+export function parseRetryAfterMs(raw: unknown): number | undefined {
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  const seconds = Number(raw);
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : undefined;
+}
+
+function retryAfterMs(error: AxiosError): number | undefined {
+  return parseRetryAfterMs(error.response?.headers?.["retry-after"]);
+}
+
+/**
+ * A timeout, network error, 429 or 5xx. On a status check this says nothing
+ * about the task, which keeps running (docs: task-lifecycle).
+ */
+export function isTransientError(error: unknown): boolean {
+  if (!(error instanceof AxiosError)) return false;
+  const status = error.response?.status;
+  return status === undefined || status === 429 || status >= 500;
+}
+
+/** The request limiter's 429: refused before any handler ran, so nothing was created. */
+function isRequestRateLimit(error: AxiosError): boolean {
+  return error.response?.status === 429 &&
+    (retryAfterMs(error) !== undefined || /rate limit exceeded/i.test(responseMessage(error)));
+}
+
+/** A POST that may have reached the handler: it can have created (and charged) a task. */
+function createOutcomeUnknown(error: AxiosError): boolean {
+  if (error.config?.method?.toUpperCase() !== "POST") return false;
+  const status = error.response?.status;
+  if (status !== undefined) return status >= 500;
+  return error.code !== "ENOTFOUND" && error.code !== "ECONNREFUSED";
+}
+
+/**
+ * Milliseconds to wait before retrying a failed request, or undefined to give up.
+ *
+ * GET and DELETE retry on a timeout, a network error, a 429 or a 5xx. A POST
+ * creates a task and charges for it: after a timeout, a dropped connection or a
+ * 5xx it may have gone through, and resending it would create and bill a second
+ * task (docs: errors, "Best Practices"). So a POST only retries the request
+ * limiter's 429, which is refused before anything is created — never a
+ * queue-full 429, which only a finished task clears. Retry-After is honored
+ * when present.
+ */
+export function retryDelayMs(method: string | undefined, error: unknown, attempt: number): number | undefined {
+  if (attempt >= MAX_RETRIES || !(error instanceof AxiosError)) return undefined;
+  const retryable = method?.toUpperCase() === "POST"
+    ? isRequestRateLimit(error)
+    : !isQueueFullError(error) && isTransientError(error);
+  if (!retryable) return undefined;
+  const hinted = retryAfterMs(error);
+  if (hinted !== undefined) return hinted <= MAX_RETRY_AFTER_MS ? Math.max(hinted, 1000) : undefined;
+  return RETRY_DELAYS[Math.min(attempt, RETRY_DELAYS.length - 1)];
 }
 
 /**
