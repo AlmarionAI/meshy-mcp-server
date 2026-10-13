@@ -38,6 +38,12 @@ Calls that pass no type now return less than before. Check these when upgrading:
 - Print, convert, resize and UV unwrap tools accept `input_task_id` together with `model_url`
   (`input_task_id` wins, as the API does) instead of rejecting the call
 - Image prompts are no longer capped at 600 characters; the image endpoints have no limit
+- `meshy_cancel_task` refuses an IN_PROGRESS task itself instead of sending the DELETE, so a
+  task that finishes in the meantime can never be deleted without `confirm_delete`
+- A list response cut short by the size limit now continues right after the last entry it
+  showed; the cut half used to be skipped
+- A Creative Lab part that fails to download is returned as a URL (`not_saved`) while the other
+  parts are still saved; one failed part used to fail the whole call
 - `meshy_multi_image_to_3d` no longer sends `model_type`, which the endpoint ignores; the argument is
   still accepted (deprecated) so existing calls keep working
 - Error messages follow the HTTP status and keep the API's text: 402 points at

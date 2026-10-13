@@ -103,6 +103,8 @@ export function registerWorkspaceTools(server: McpServer, client: MeshyClient) {
           const truncatedModels = output.models.slice(0, Math.max(1, Math.floor(output.models.length / 2)));
           output.models = truncatedModels;
           output.page_count = truncatedModels.length;
+          output.has_more = true;
+          output.next_offset = params.offset + truncatedModels.length;
           textContent = (params.response_format === ResponseFormat.MARKDOWN
             ? renderModelsMarkdown(truncatedModels, true)
             : JSON.stringify(output, null, 2)) +

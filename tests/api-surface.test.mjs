@@ -241,6 +241,12 @@ test("cancel deletes a finished task only after confirmation and explains refund
   assert.deepEqual(done.deletes, ["/openapi/v1/image-to-3d/t"]);
   assert.match(deleted.structuredContent.message, /permanently/);
 
+  const running = createHarness(registerTaskTools, { "/openapi/v1/image-to-3d/t": task("IN_PROGRESS", "image-to-3d") });
+  const notStopped = await running.run("meshy_cancel_task", { task_id: "t", confirm_delete: true });
+  assert.equal(notStopped.isError, true);
+  assert.match(notStopped.content[0].text, /cannot be stopped/);
+  assert.deepEqual(running.deletes, []);
+
   const pending = createHarness(registerTaskTools, { "/openapi/v1/image-to-3d/t": task("PENDING", "image-to-3d") });
   assert.match((await pending.run("meshy_cancel_task", { task_id: "t" })).structuredContent.message, /refunded/);
 
@@ -270,7 +276,10 @@ test("download saves every Creative Lab part unless a format is asked for", asyn
   const fs = await import("node:fs");
   const os = await import("node:os");
   const path = await import("node:path");
-  const server = createServer((req, res) => res.end(req.url));
+  const server = createServer((req, res) => {
+    if (req.url === "/gone.stl") res.statusCode = 404;
+    res.end(req.url);
+  });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "meshy-dl-"));
@@ -287,6 +296,15 @@ test("download saves every Creative Lab part unless a format is asked for", asyn
     const one = await h.run("meshy_download_model", { task_id: "t", task_type: "creative-lab-lamp-build", format: "glb", save_to: path.join(dir, "one.glb") });
     assert.equal(one.structuredContent.format, "glb", JSON.stringify(one));
     assert.equal(fs.readFileSync(path.join(dir, "one.glb"), "utf-8"), "/lamp.glb");
+
+    const partial = createHarness(registerTaskTools, {
+      "/openapi/creative-lab/lamp/v1/build/t": () => ({ ...lamp(), model_urls: { glb: `${base}/lamp.glb`, base_stl: `${base}/gone.stl` } }),
+    });
+    const some = await partial.run("meshy_download_model", { task_id: "t", task_type: "creative-lab-lamp-build", save_to: path.join(dir, "some.stl") });
+    assert.equal(some.isError, undefined, JSON.stringify(some));
+    assert.equal(some.structuredContent.count, 1);
+    assert.deepEqual(some.structuredContent.not_saved.map((n) => [n.part, n.url]), [["base_stl", `${base}/gone.stl`]]);
+    assert.match(some.content[0].text, /Not saved/);
   } finally {
     server.close();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -373,4 +391,14 @@ test("a task listed by a sibling route appears once, under its own type", async 
   assert.deepEqual(both.structuredContent.tasks.map((t) => [t.id, t.task_type]), [["a", "text-to-image"], ["b", "image-to-image"]]);
   const one = await h.run("meshy_list_tasks", { task_type: "text-to-image" });
   assert.deepEqual(one.structuredContent.tasks.map((t) => t.id), ["a"]);
+});
+
+test("a truncated list continues right after the tasks it showed", async () => {
+  const many = Array.from({ length: 40 }, (_, i) => ({ id: `t${i}`, type: "image-to-3d", status: "SUCCEEDED", created_at: 1000 - i, name: "x".repeat(2000) }));
+  const h = createHarness(registerTaskTools, { "/openapi/v1/image-to-3d": many });
+  const page = await h.run("meshy_list_tasks", { task_type: "image-to-3d", limit: 40 });
+  const shown = page.structuredContent.tasks.length;
+  assert.ok(shown < 40, `expected truncation, got ${shown}`);
+  assert.equal(page.structuredContent.has_more, true);
+  assert.equal(page.structuredContent.next_offset, shown);
 });

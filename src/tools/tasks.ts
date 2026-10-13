@@ -702,6 +702,8 @@ status and phase filter the fetched tasks, so a page can be shorter than limit; 
           const truncatedTasks = output.tasks.slice(0, Math.max(1, Math.floor(output.tasks.length / 2)));
           output.tasks = truncatedTasks;
           output.page_count = truncatedTasks.length;
+          output.has_more = true;
+          output.next_offset = params.offset + truncatedTasks.length;
           if (params.response_format === ResponseFormat.MARKDOWN) {
             textContent = renderTasksMarkdown(truncatedTasks, truncatedTasks.length, true) +
               `\n\n[Response truncated. Use smaller limit or add task_type filter to see more results.]`;
@@ -766,6 +768,18 @@ Returns { success, task_id, task_type, previous_status, message }.`,
           return {
             isError: true,
             content: [{ type: "text", text: `Error: this Creative Lab task is already ${previousStatus}; the API cannot cancel or delete a finished Creative Lab task.` }]
+          };
+        }
+        if (!creativeLab && previousStatus === TaskStatus.IN_PROGRESS) {
+          // The API refuses this with 409 anyway; asking it would delete the task,
+          // unconfirmed, if it finished between the status read and the DELETE.
+          return {
+            isError: true,
+            content: [{
+              type: "text",
+              text: "This task is IN_PROGRESS: a running task cannot be stopped and its credits are already spent. Nothing was changed. " +
+                "Check it with meshy_get_task_status; delete it after it finishes only if the user wants the result gone (confirm_delete: true)."
+            }]
           };
         }
         if (finished && !params.confirm_delete) {
@@ -989,22 +1003,29 @@ ${expiryNote(task)}`
               return m ? `.${m[1].toLowerCase()}` : "";
             };
             const clPaths: string[] = [];
+            const notSaved: { part: string; url: string; error: string }[] = [];
+            const saveCreativeLabPart = async (key: string, url: string, target: string) => {
+              try {
+                await downloadFileToLocal(url, target);
+                clPaths.push(target);
+              } catch (error) {
+                notSaved.push({ part: key, url, error: error instanceof Error ? error.message : String(error) });
+              }
+            };
             let clProjectDir: string | undefined;
             if (params.save_to) {
               const dir = path.dirname(params.save_to);
               const stem = path.basename(params.save_to, path.extname(params.save_to));
               for (const [key, url] of parts) {
                 const target = path.join(dir, `${stem}_${key}${modelExt(url)}`);
-                await downloadFileToLocal(url, target);
-                clPaths.push(target);
+                await saveCreativeLabPart(key, url, target);
               }
             } else {
               const stage = inferStage(taskType, task.type);
               clProjectDir = resolveProjectDir(params.task_id, taskType, task.prompt, params.parent_task_id, task.created_at);
               for (const [key, url] of parts) {
                 const target = path.join(clProjectDir, `${key}${modelExt(url)}`);
-                await downloadFileToLocal(url, target);
-                clPaths.push(target);
+                await saveCreativeLabPart(key, url, target);
               }
               const record: TaskRecord = {
                 task_id: params.task_id,
@@ -1022,13 +1043,14 @@ ${expiryNote(task)}`
               local_paths: clPaths,
               project_dir: clProjectDir,
               count: clPaths.length,
+              not_saved: notSaved.length > 0 ? notSaved : undefined,
               expires_at: expiresAt(task)
             };
             const textContent = `# Creative Lab Product Downloaded
 
 **Task ID**: ${params.task_id}
 **Saved ${clPaths.length} file(s)**:
-${clPaths.map(p => `- ${p}`).join("\n")}${clProjectDir ? `\n**Project Folder**: ${clProjectDir}` : ""}
+${clPaths.map(p => `- ${p}`).join("\n")}${clProjectDir ? `\n**Project Folder**: ${clProjectDir}` : ""}${notSaved.length > 0 ? `\n**Not saved** (download these URLs directly):\n${notSaved.map(n => `- ${n.part}: ${n.url} (${n.error})`).join("\n")}` : ""}
 
 ${expiryNote(task)}`;
             return {
