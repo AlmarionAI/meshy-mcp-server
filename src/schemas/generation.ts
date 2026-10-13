@@ -95,7 +95,7 @@ const originAt = () =>
     .describe("'bottom' or 'center' (default bottom with auto_size).");
 const modelType = () =>
   z.nativeEnum(ModelType).optional()
-    .describe("standard (default); smart-topology (ai_model meshy-t2): a clean, part-separated, triangle-only mesh made directly at target_polycount (100–15,000, default 4,000), ignoring remesh/decimation; lowpoly is deprecated (billed like meshy-6, retires 2026-10-30).");
+    .describe("standard (default); smart-topology (ai_model meshy-t2 or meshy-t2.5): a clean, part-separated, triangle-only mesh made directly at target_polycount, ignoring remesh/decimation; lowpoly is deprecated (billed like meshy-6, retires 2026-10-30).");
 
 const STANDARD_MODELS = "'latest' (default, = Meshy 7.1) or 'meshy-7.1' (best), 'meshy-6', 'meshy-6-lite' (fast, cheap, 2K textures only); 'meshy-7' is deprecated";
 
@@ -109,15 +109,15 @@ export const TextTo3DInputSchema = z.object({
     .describe("What to model (max 800 characters)"),
   ai_model: z.enum([
     AIModel.LATEST, AIModel.MESHY_7_1, AIModel.MESHY_6, AIModel.MESHY_6_LITE,
-    AIModel.MESHY_7, SmartTopologyModel.MESHY_T2
+    AIModel.MESHY_7, SmartTopologyModel.MESHY_T2, SmartTopologyModel.MESHY_T2_5
   ])
     .optional()
-    .describe(`${STANDARD_MODELS}. With model_type smart-topology: 'meshy-t2' (the default there).`),
+    .describe(`${STANDARD_MODELS}. With model_type smart-topology: 'meshy-t2' (the default there) or 'meshy-t2.5' (newest, sharper detail for game assets).`),
   model_type: modelType(),
   geometry_resolution: geometryResolution(),
   ultra_mode: deprecatedUltraMode(),
   topology: topology(),
-  target_polycount: polycount("Standard: remesh target 100–300,000, needs should_remesh true. Smart Topology: 100–15,000 (default 4,000)."),
+  target_polycount: polycount("Standard: remesh target 100–300,000, needs should_remesh true. Smart Topology: meshy-t2 100–15,000 (default 4,000), meshy-t2.5 100–30,000 (default 15,000)."),
   decimation_mode: decimationMode(),
   symmetry_mode: deprecatedSymmetryMode(),
   should_remesh: shouldRemesh(),
@@ -144,14 +144,14 @@ export const ImageTo3DInputSchema = z.object({
     .describe("A SUCCEEDED text-to-image / image-to-image task with exactly one image, used as the input."),
   ai_model: z.union([z.nativeEnum(AIModel), z.nativeEnum(SmartTopologyModel)])
     .optional()
-    .describe(`${STANDARD_MODELS}. With model_type smart-topology: 'meshy-t2' (the default there); 'meshy-t1' is deprecated, use meshy-t2.`),
+    .describe(`${STANDARD_MODELS}. With model_type smart-topology: 'meshy-t2' (the default there) or 'meshy-t2.5' (newest, sharper detail for game assets); 'meshy-t1' is deprecated.`),
   geometry_resolution: geometryResolution(),
   ultra_mode: deprecatedUltraMode(),
   model_type: modelType(),
   pose_mode: poseMode(),
   enable_pbr: enablePbr(),
   topology: topology(),
-  target_polycount: polycount("Standard: remesh target 100–300,000, needs should_remesh true. Smart Topology: 100–15,000 (default 4,000)."),
+  target_polycount: polycount("Standard: remesh target 100–300,000, needs should_remesh true. Smart Topology: meshy-t2 100–15,000 (default 4,000), meshy-t2.5 100–30,000 (default 15,000)."),
   decimation_mode: decimationMode(),
   should_remesh: shouldRemesh(),
   symmetry_mode: deprecatedSymmetryMode(),
@@ -183,7 +183,7 @@ export const TextTo3DRefineInputSchema = z.object({
   texture_image_url: textureImageUrl(),
   ai_model: z.nativeEnum(AIModel)
     .optional()
-    .describe("Optional override: 'meshy-7.1', 'latest' (= 7.1), 'meshy-6', 'meshy-6-lite' (2K only). Omit (recommended) to inherit the preview's model; not meshy-t2."),
+    .describe("Optional override: 'meshy-7.1', 'latest' (= 7.1), 'meshy-6', 'meshy-6-lite' (2K only). Omit (recommended) to inherit the preview's model; not meshy-t2/t2.5."),
   texture_resolution: textureResolution(),
   hd_texture: hdTexture(),
   remove_lighting: z.boolean().optional()

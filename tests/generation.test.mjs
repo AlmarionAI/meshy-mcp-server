@@ -75,7 +75,51 @@ test("Smart Topology selects T2 and infers the matching model type", () => {
   }
 });
 
+test("T2.5 runs on text and image Smart Topology up to 30,000 faces", () => {
+  for (const endpoint of ["text", "image"]) {
+    for (const options of [
+      { ai_model: "meshy-t2.5", model_type: "smart-topology", target_polycount: 30000 },
+      { ai_model: "meshy-t2.5", target_polycount: 100 },
+    ]) {
+      const resolved = resolveGenerationOptions(options, endpoint);
+      assert.equal(resolved.ai_model, "meshy-t2.5");
+      assert.equal(resolved.model_type, "smart-topology");
+      assert.equal(resolved.smartTopology, true);
+    }
+  }
+});
+
 for (const [label, options, endpoint, message] of [
+  [
+    "T2 at the T2.5 face limit",
+    { ai_model: "meshy-t2", target_polycount: 30000 },
+    "image",
+    /15,000/,
+  ],
+  [
+    "T2.5 over face limit",
+    { ai_model: "meshy-t2.5", target_polycount: 30001 },
+    "text",
+    /30,000/,
+  ],
+  [
+    "T2.5 with standard type",
+    { ai_model: "meshy-t2.5", model_type: "standard" },
+    "text",
+    /require model_type/,
+  ],
+  [
+    "multi-image T2.5",
+    { ai_model: "meshy-t2.5" },
+    "multi-image",
+    /supported on text preview and single-image/,
+  ],
+  [
+    "text T2.5 quad",
+    { ai_model: "meshy-t2.5", topology: "quad" },
+    "text",
+    /triangle topology/,
+  ],
   [
     "standard model with Smart Topology",
     { ai_model: "meshy-7.1", model_type: "smart-topology" },
@@ -192,6 +236,50 @@ test("text T2 forwards face target, not remesh or decimation", async () => {
   assert.equal(body.topology, "triangle");
   assert.equal("should_remesh" in body, false);
   assert.equal("decimation_mode" in body, false);
+});
+
+test("T2.5 request carries the model and its face target", async () => {
+  const { call } = createHarness();
+  const { body: text } = await call("meshy_text_to_3d", {
+    prompt: "a robot",
+    model_type: "smart-topology",
+    ai_model: "meshy-t2.5",
+    target_polycount: 30000,
+  });
+  assert.equal(text.ai_model, "meshy-t2.5");
+  assert.equal(text.model_type, "smart-topology");
+  assert.equal(text.target_polycount, 30000);
+  const { path, body: image } = await call("meshy_image_to_3d", {
+    input_task_id: "offline-image",
+    model_type: "smart-topology",
+    ai_model: "meshy-t2.5",
+    target_polycount: 20000,
+    texture_resolution: "8k",
+  });
+  assert.equal(path, "/openapi/v1/image-to-3d");
+  assert.equal(image.ai_model, "meshy-t2.5");
+  assert.equal(image.model_type, "smart-topology");
+  assert.equal(image.target_polycount, 20000);
+  assert.equal(image.texture_resolution, "8k");
+});
+
+test("T2.5 is advertised on text and image only, and is not a refine override", () => {
+  const tools = new Map();
+  registerGenerationTools(
+    { registerTool(name, config) { tools.set(name, config.inputSchema); } },
+    { async post() { throw new Error("must not post"); } },
+  );
+  const accepts = (name, input) => tools.get(name).safeParse({ ...input, ai_model: "meshy-t2.5" }).success;
+  assert.equal(accepts("meshy_text_to_3d", { prompt: "a robot" }), true);
+  assert.equal(accepts("meshy_image_to_3d", { input_task_id: "x" }), true);
+  assert.equal(accepts("meshy_multi_image_to_3d", { image_urls: ["https://example.invalid/a.png"] }), false);
+  assert.equal(accepts("meshy_text_to_3d_refine", { preview_task_id: "x" }), false);
+});
+
+test("Smart Topology without ai_model still defaults to T2", async () => {
+  const { call } = createHarness();
+  const { body } = await call("meshy_image_to_3d", { input_task_id: "x", model_type: "smart-topology" });
+  assert.equal(body.ai_model, "meshy-t2");
 });
 
 test("invalid T2 request fails before posting", async () => {

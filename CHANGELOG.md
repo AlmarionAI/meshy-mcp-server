@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.6.4] - 2026-10-13
+
+### Added
+
+- `ai_model: "meshy-t2.5"` on `meshy_image_to_3d` and `meshy_text_to_3d` (preview) with
+  `model_type: "smart-topology"`: the newest Smart Topology model, with sharper detail for game
+  assets. Triangle-only; `target_polycount` 100–30,000 (default 15,000). Same cost as `meshy-t2`:
+  5 credits mesh only, 15 with 2K/4K textures, 20 with 8K textures (image to 3D). A refine of a
+  `meshy-t2.5` preview inherits its model, as with `meshy-t2`. Not available on multi-image to 3D.
+  `model_type: "smart-topology"` without `ai_model` still uses `meshy-t2`
+
 ## [0.6.3] - 2026-10-13
 
 Sync with the public Meshy API as of 2026-10-12. Tools: 24 → 28.
