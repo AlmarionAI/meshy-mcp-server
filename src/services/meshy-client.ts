@@ -236,6 +236,7 @@ export async function listAcrossTypes(
 
   const items: ListedTask[] = [];
   const failed: TaskType[] = [];
+  const seen = new Set<string>();
   let more = false;
   results.forEach((result, i) => {
     if (result.status === "rejected") {
@@ -244,7 +245,14 @@ export async function listAcrossTypes(
     }
     more ||= result.value.full;
     for (const task of result.value.tasks) {
-      if (!opts.keep || opts.keep(task)) items.push({ task, taskType: types[i] });
+      // Some list routes also return sibling types (text-to-image lists
+      // image-to-image tasks): label each task by its own type, skip types not
+      // asked for, and keep one copy per id.
+      const taskType = toTaskType(task.type) ?? types[i];
+      if (!types.includes(taskType) || seen.has(task.id)) continue;
+      if (opts.keep && !opts.keep(task)) continue;
+      seen.add(task.id);
+      items.push({ task, taskType });
     }
   });
   if (types.length > 0 && failed.length === types.length) {

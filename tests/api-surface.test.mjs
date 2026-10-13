@@ -359,3 +359,16 @@ test("list_tasks queries the five generation and image types unless told otherwi
   assert.deepEqual(both.structuredContent.tasks.map((t) => [t.id, t.task_type]), [["r", "rigging"], ["p", "print-split"]]);
   assert.equal(h.schema("meshy_list_tasks").safeParse({ task_types: ["nope"] }).success, false);
 });
+
+test("a task listed by a sibling route appears once, under its own type", async () => {
+  const t2i = { id: "a", type: "text-to-image", status: "SUCCEEDED", created_at: 2 };
+  const i2i = { id: "b", type: "image-to-image", status: "SUCCEEDED", created_at: 1 };
+  const h = createHarness(registerTaskTools, {
+    "/openapi/v1/text-to-image": [t2i, i2i],
+    "/openapi/v1/image-to-image": [i2i],
+  });
+  const both = await h.run("meshy_list_tasks", { task_types: ["text-to-image", "image-to-image"] });
+  assert.deepEqual(both.structuredContent.tasks.map((t) => [t.id, t.task_type]), [["a", "text-to-image"], ["b", "image-to-image"]]);
+  const one = await h.run("meshy_list_tasks", { task_type: "text-to-image" });
+  assert.deepEqual(one.structuredContent.tasks.map((t) => t.id), ["a"]);
+});
