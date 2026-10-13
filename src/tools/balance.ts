@@ -19,19 +19,7 @@ export function registerBalanceTool(server: McpServer, client: MeshyClient) {
     "meshy_check_balance",
     {
       title: "Check Credit Balance",
-      description: `Check your Meshy account credit balance. Free.
-
-Returns the credits available now, split into monthly credits (expire at the next monthly refresh) and permanent credits (never expire). For team members these are the team's shared pool.
-
-Args:
-  - response_format (enum): Output format - "markdown" or "json" (default: "markdown")
-
-Returns:
-  { "balance": 1000, "monthly_credits": 600, "permanent_credits": 400, "monthly_resets_at": "2026-11-01T00:00:00.000Z" }
-
-Examples:
-  - Check balance: {}
-  - JSON format: { response_format: "json" }`,
+      description: `Check the Meshy credit balance. Free. For team members it is the team's shared pool.`,
       inputSchema: CheckBalanceInputSchema,
       outputSchema: BalanceOutputSchema,
       annotations: {
@@ -87,25 +75,13 @@ Examples:
     "meshy_list_usage",
     {
       title: "List API Usage Records",
-      description: `List the team's finished API tasks with the credits each consumed, newest first. Free. Use it to break down spend per endpoint or per API key.
+      description: `List the team's finished API tasks with the credits each consumed, newest first. Free. Use it to break down spend per endpoint or API key. Only for API keys on a Studio or Enterprise team (others get 403).
 
-Only for API keys on a Studio or Enterprise team; any other key gets a 403.
+Covers SUCCEEDED and FAILED tasks (FAILED ones are refunded, so they show 0); a task still running is not listed yet. Without start_time / end_time it covers the last 30 days.
 
-Covers tasks that reached SUCCEEDED or FAILED (FAILED tasks are refunded, so they show 0 credits). Credits are charged at creation, so a task still running is not listed yet. Without start_time / end_time it covers the last 30 days.
+Returns { records: [{ task_id, endpoint, status, created_at, finished_at, consumed_credits, api_key_name, api_key_suffix }], page_num, page_size, has_more }
 
-Args:
-  - page_num (number): Page, default 1. page_size (number): 1–100, default 20
-  - sort_by (enum): "-created_at" (default) or "+created_at"
-  - start_time / end_time (string, optional): RFC 3339 window on created_at, at most 1 year
-  - endpoints (string[], optional): e.g. ["image-to-3d", "text-to-3d"] ("text-to-3d" covers preview and refine)
-  - status (enum, optional): "SUCCEEDED" or "FAILED"
-  - response_format (enum): "markdown" or "json" (default: "markdown")
-
-Returns: { records: [{ task_id, endpoint, status, created_at, finished_at, consumed_credits, api_key_name, api_key_suffix }], page_num, page_size, has_more }
-
-Examples:
-  - Last 30 days: {}
-  - September image-to-3d spend: { start_time: "2026-09-01T00:00:00Z", end_time: "2026-10-01T00:00:00Z", endpoints: ["image-to-3d"], page_size: 100 }`,
+Example (September image-to-3d spend): { start_time: "2026-09-01T00:00:00Z", end_time: "2026-10-01T00:00:00Z", endpoints: ["image-to-3d"], page_size: 100 }`,
       inputSchema: ListUsageInputSchema,
       annotations: {
         readOnlyHint: true,

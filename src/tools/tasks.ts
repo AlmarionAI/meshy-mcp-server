@@ -408,30 +408,9 @@ export function registerTaskTools(server: McpServer, client: MeshyClient) {
     "meshy_get_task_status",
     {
       title: "Get Task Status",
-      description: `Check task status or wait for completion. Supports two modes:
+      description: `Wait for a task to finish (wait=true, default) or check it once (wait=false). Reports the task's real task_type; pass it to the download and cancel tools.
 
-**wait=true (default)**: Polls until SUCCEEDED / FAILED / CANCELED or timeout_seconds runs out, at the API's suggested interval (else 5s→30s backoff). A failed status check (timeout, 429, 5xx) is retried at the next poll. Running out of time returns outcome "TIMEOUT": the task keeps running on Meshy — call again with the same task_id to keep waiting (Meshy advises allowing up to 60 minutes from creation).
-
-**wait=false**: Returns current status immediately (single query) with progress bar.
-
-Args:
-  - task_id (string): Task ID returned from generation tools (required)
-  - task_type (enum, optional): Task type for endpoint routing. If omitted or wrong, the server finds the task and reports its actual type.
-  - wait (boolean): Auto-wait until completion (default: true)
-  - timeout_seconds (number): Max wait for this call when wait=true (default: 300, max: 300); call again to wait longer
-  - response_format (enum): "markdown" or "json" (default: "markdown")
-
-Returns (wait=true, SUCCEEDED):
-  Progress bar + full task data + model info + download instructions
-
-Returns (wait=false):
-  Progress bar + current status snapshot
-
-Examples:
-  - Auto-wait: { task_id: "abc-123" }
-  - Quick check: { task_id: "abc-123", wait: false }
-  - Image-to-3d: { task_id: "abc-123", task_type: "image-to-3d" }
-  - Short timeout: { task_id: "abc-123", timeout_seconds: 60 }`,
+wait=true polls at the API's suggested interval (else 5s→30s backoff) until SUCCEEDED / FAILED / CANCELED or timeout_seconds runs out; a failed status check (timeout, 429, 5xx) is retried at the next poll. Running out of time returns outcome "TIMEOUT": the task keeps running on Meshy — call again with the same task_id (Meshy advises allowing up to 60 minutes from creation).`,
       inputSchema: GetTaskStatusInputSchema,
       outputSchema: TaskStatusOutputSchema,
       annotations: {
@@ -622,40 +601,9 @@ ${stillRunning}`
     "meshy_list_tasks",
     {
       title: "List Generation Tasks",
-      description: `List tasks across all task types with filtering and pagination.
+      description: `List tasks of one or every type, newest first by default. Without task_type it queries every type (one request per type) and pages through the merged list. Use it to find a task whose ID you lost; tasks created through the API do not appear in the Meshy web app. For finished 3D models only, meshy_list_models is cheaper.
 
-Queries one or all task types. When task_type is omitted, queries every task type's list endpoint in parallel (one request per type) and pages through the merged list, sorted by creation time. Use it to find a task whose ID you no longer have — tasks created through the API do not appear in the Meshy web app. For finished 3D models only, meshy_list_models is cheaper.
-
-Args:
-  - task_type (enum, optional): One task type (any value meshy_get_task_status takes, e.g. "image-to-3d", "rigging", "animation", "print-split", "text-to-motion", "creative-lab-lamp-build"). If omitted, queries ALL types and merges results.
-  - sort_by (enum): Sort by creation time - "-created_at" (newest first, default) or "+created_at" (oldest first)
-  - status (enum, optional): Keep only tasks with this status - "PENDING", "IN_PROGRESS", "SUCCEEDED", "FAILED", "CANCELED". Applied to the fetched page, so a page can come back shorter than limit
-  - phase (enum, optional): Keep only tasks in this phase. Applied to the fetched page, like status
-  - limit (number): Results per page, 1-100 (default: 20)
-  - offset (number): Skip N results for pagination (default: 0)
-  - response_format (enum): Output format - "markdown" or "json" (default: "markdown")
-
-Returns:
-  {
-    "page_count": 20,                  // Tasks in this response
-    "offset": 0,
-    "tasks": [ { task_type: "text-to-3d", ... }, ... ],
-    "has_more": true,
-    "next_offset": 20
-  }
-
-Pagination:
-  To get next page, use the returned next_offset value.
-
-Examples:
-  - List all recent tasks: { limit: 10 }
-  - List only image-to-3d: { task_type: "image-to-3d", limit: 20 }
-  - List successful tasks: { status: "SUCCEEDED", limit: 20 }
-  - Get second page: { limit: 20, offset: 20 }
-
-Error Handling:
-  - Automatically truncates if response exceeds size limit
-  - Task types whose list request fails are reported in failed_types`,
+status and phase filter the fetched tasks, so a page can be shorter than limit; continue with next_offset while has_more. Types whose request failed are listed in failed_types.`,
       inputSchema: ListTasksInputSchema,
       annotations: {
         readOnlyHint: true,
@@ -782,17 +730,7 @@ Every other task:
   - IN_PROGRESS → refused: the task keeps running and its credits are not refundable. Wait until it finishes
   - SUCCEEDED / FAILED / CANCELED → PERMANENTLY deleted with its files, no refund. Requires confirm_delete: true — ask the user first
 
-Args:
-  - task_id (string): Task ID (required)
-  - task_type (enum, optional): Task type for endpoint routing. If omitted or wrong, the server finds the task by its own type.
-  - confirm_delete (boolean, optional): set true only after the user agreed to permanently delete a finished task
-
-Returns:
-  { "success": true, "task_id": "abc-123", "task_type": "image-to-3d", "previous_status": "PENDING", "message": "..." }
-
-Examples:
-  - Cancel a queued task: { task_id: "abc-123" }
-  - Delete a finished model the user no longer wants: { task_id: "abc-123", confirm_delete: true }`,
+Returns { success, task_id, task_type, previous_status, message }.`,
       inputSchema: CancelTaskInputSchema,
       annotations: {
         readOnlyHint: false,
@@ -869,36 +807,15 @@ Examples:
     "meshy_download_model",
     {
       title: "Download Model or Image",
-      description: `Download a completed task's output to local disk with automatic file organization.
+      description: `Save a finished task's output under meshy_output/ (project folders with history), or at save_to.
 
-Handles both 3D models and 2D images: 3D tasks save the chosen model \`format\`; image tasks (text-to-image / image-to-image) save the generated PNG/JPG image(s) and text-to-motion saves its clip (FBX or BVH), both ignoring \`format\`. Creative Lab: omit \`format\` to save every part. Rigging and animation tasks are not saved: they return their file URLs.
+  - 3D tasks: ONE model format — ask the user which first (GLB viewing, OBJ white-model printing, 3MF multicolor printing, FBX game engines, USDZ AR, BLEND Blender); never download all. A format exists only if it was generated: 3mf needs target_formats ["3mf"] at creation, meshy_convert or meshy_process_multicolor.
+  - Creative Lab: omit format to save every part.
+  - Images and text-to-motion clips save their own files and ignore format.
+  - Rigging and animation tasks are not saved: they return their file URLs.
+If a download fails, its URL is returned instead.
 
-IMPORTANT: For 3D models, ask the user which format they need BEFORE downloading. Do NOT download all formats.
-Format recommendations: GLB (viewing), OBJ (white model printing), 3MF (multicolor printing), FBX (game engines), USDZ (AR).
-
-By default, files are auto-saved to meshy_output/ under the current working directory with smart naming and history tracking. Use save_to to override with a custom path.
-
-Args:
-  - task_id (string): Task ID of completed model (required)
-  - task_type (enum, optional): Task type for endpoint routing. If omitted or wrong, the server finds the task by its own type.
-  - format (enum, optional): Model format - "glb", "fbx", "usdz", "stl", "obj", "blend", or "3mf" (default: "glb"). IMPORTANT: Ask user which format they need before downloading. NOTE: "3mf" is downloadable only if it was generated — request it via target_formats:["3mf"] at creation, or use meshy_convert / meshy_process_multicolor.
-  - include_textures (boolean): Include texture files (default: true)
-  - save_to (string, optional): Override auto path with a custom ABSOLUTE path. If omitted, auto-saves to meshy_output/{timestamp}_{prompt}_{id}/.
-  - parent_task_id (string, optional): Parent task ID for chaining (e.g., preview_task_id for refine). Places output in the same project folder.
-  - print_ready (boolean, optional): If true and format="obj", auto-fix for 3D printing: Y-up→Z-up, scale to height, center, bottom at Z=0.
-  - print_height_mm (number, optional): Target height in mm when print_ready=true. Default 75. Adjust per user request.
-
-Returns:
-  { "local_path": "/path/to/file.obj", "file_size_bytes": 12345678, "project_dir": "...", "print_fixed": true }
-
-Examples:
-  - Auto-save: { task_id: "abc-123", format: "glb" }
-  - 3D printing: { task_id: "abc-123", format: "obj", print_ready: true, print_height_mm: 100 }
-  - Chained refine: { task_id: "def-456", parent_task_id: "abc-123", format: "glb" }
-
-Error Handling:
-  - Returns error if task is not SUCCEEDED
-  - If download fails, falls back to returning URLs`,
+Example (print): { task_id: "abc-123", format: "obj", print_ready: true, print_height_mm: 100 }`,
       inputSchema: DownloadModelInputSchema,
       annotations: {
         readOnlyHint: false,

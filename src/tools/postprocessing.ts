@@ -43,40 +43,9 @@ export function registerPostProcessingTools(server: McpServer, client: MeshyClie
     "meshy_remesh",
     {
       title: "Remesh 3D Model",
-      description: `Remesh an existing 3D model: change its polygon count or topology. Cost: 5 credits.
+      description: `Remesh an existing model: change its polygon count or topology. Cost: 5 credits. For a format change only use meshy_convert (1 credit); to scale, meshy_resize (1 credit).
 
-For a format change only use meshy_convert (1 credit); to scale a model use meshy_resize (1 credit). The resize / origin / convert_format_only fields here are deprecated in favor of those tools.
-
-Args:
-  - input_task_id (string, optional): SUCCEEDED text-to-3d (preview or refine), image-to-3d or retexture task
-  - model_url (string, optional): Public URL of a .glb / .gltf / .obj / .fbx / .stl model, or a GLB data URI
-    (Provide either input_task_id or model_url)
-  - target_formats (array, optional): Output formats (default: ["glb"]). Options: "glb", "fbx", "obj", "usdz", "blend", "stl", "3mf"
-  - topology (enum, optional): Mesh topology - "quad" or "triangle" (default)
-  - target_polycount (number, optional): Target polygon count (100–300,000, default 30,000)
-  - decimation_mode (number, optional): Adaptive decimation level 1–4 (1 = ultra … 4 = low); overrides target_polycount
-  - alpha_thumbnail (boolean, optional): Also render a transparent-background preview
-  - resize_height / resize_longest_side / auto_size / origin_at / convert_format_only: deprecated, see above
-  - response_format (enum): Output format - "markdown" or "json" (default: "markdown")
-
-Returns:
-  {
-    "task_id": "abc-123-def",
-    "status": "PENDING",
-    "message": "Remesh task created...",
-    "estimated_time": "1-2 minutes"
-  }
-
-Next Steps:
-  Use meshy_get_task_status with task_id and task_type="remesh" to check progress.
-
-Examples:
-  - Remesh by task: { input_task_id: "abc-123", target_polycount: 10000 }
-  - Quad mesh for a game engine: { input_task_id: "abc-123", topology: "quad", target_formats: ["fbx"] }
-
-Error Handling:
-  - Returns "NotFound" if input_task_id doesn't exist
-  - Returns "InvalidModel" if model_url is not accessible`,
+Example: { input_task_id: "abc-123", topology: "quad", target_polycount: 10000, target_formats: ["fbx"] }`,
       inputSchema: RemeshInputSchema,
       outputSchema: TaskCreatedOutputSchema,
       annotations: {
@@ -134,49 +103,14 @@ Error Handling:
     "meshy_retexture",
     {
       title: "Retexture 3D Model",
-      description: `Apply new AI-generated textures to an existing 3D model using Meshy AI.
+      description: `Apply new AI textures to an existing model. Cost: 10 credits (15 at 8K).
 
-IMPORTANT: Before calling this tool, ask the user to provide EXACTLY ONE style input:
-  - text_style_prompt: A text description of the desired texture style (e.g. "rusty metal", "cartoon style")
-  - image_style_url: A single reference image URL for the texture STYLE
-  - multiview_image_urls: 1-4 photos OF THE SAME OBJECT from different angles (not style refs)
-One of these is REQUIRED; pass only one (the tool rejects combinations).
+Ask the user for EXACTLY ONE style input (the tool rejects combinations):
+  - text_style_prompt: the style in words ("rusty metal", "cartoon")
+  - image_style_url: one image used as a STYLE reference
+  - multiview_image_urls: 1–4 photos OF THE SAME OBJECT from different angles (not style references)
 
-Args:
-  - input_task_id (string, optional): Task ID of an existing completed task to retexture
-  - model_url (string, optional): Direct URL to a model file to retexture
-    (Provide either input_task_id or model_url)
-  - text_style_prompt (string): Text prompt describing the desired texture style. Max 800 characters.
-  - image_style_url (string): URL of an image to use as texture style reference.
-  - multiview_image_urls (string[]): 1-4 ordered views of the SAME object; element 0 is the primary
-    reference and alone drives metallic/roughness prediction. Runs on Meshy 7 ("latest" is sent as "meshy-7").
-  - ai_model (enum): "latest" (default, = Meshy 7), "meshy-7", "meshy-6", or "meshy-6-lite" (2K textures only). No meshy-7.1 here. Ask user which model before proceeding
-  - enable_original_uv (boolean, optional): Keep existing UVs instead of a fresh unwrap. Default: true with input_task_id, API default (false) with model_url
-  - enable_pbr (boolean): Enable PBR textures (default: false)
-  - texture_resolution (enum, optional): "2k" (default), "4k", or "8k". 8K costs 15 credits instead of 10 — confirm with the user. Replaces the deprecated hd_texture flag.
-  - remove_lighting (boolean, optional): Remove highlights/shadows from base color texture. Only honored on meshy-6
-  - target_formats (string[], optional): Output formats. 3MF must be explicitly included if needed.
-  - response_format (enum): Output format - "markdown" or "json" (default: "markdown")
-
-Returns:
-  {
-    "task_id": "abc-123-def",
-    "status": "PENDING",
-    "message": "Retexture task created...",
-    "estimated_time": "2-3 minutes"
-  }
-
-Next Steps:
-  Use meshy_get_task_status with task_id and task_type="retexture" to check progress.
-
-Examples:
-  - Text style: { input_task_id: "abc-123", text_style_prompt: "rusty metal" }
-  - Image style: { model_url: "https://...", image_style_url: "https://style-ref.jpg" }
-  - Multi-view: { input_task_id: "abc-123", ai_model: "meshy-7", multiview_image_urls: ["https://front.jpg", "https://side.jpg"] }
-
-Error Handling:
-  - Returns "NotFound" if input_task_id doesn't exist
-  - Returns error if no style input is provided, or if more than one is provided`,
+Example: { input_task_id: "abc-123", text_style_prompt: "rusty metal" }`,
       inputSchema: RetextureInputSchema,
       outputSchema: TaskCreatedOutputSchema,
       annotations: {
@@ -300,46 +234,11 @@ Error Handling:
     "meshy_rig",
     {
       title: "Auto-Rig 3D Character",
-      description: `Automatically rig a 3D character model for animation using Meshy AI.
+      description: `Auto-rig a humanoid character for animation. Cost: 5 credits, including free walking + running animations (GLB + FBX, separate files).
 
-Creates a skeletal rig for character models, enabling them to be animated. Rigging INCLUDES free walking + running animations.
+REQUIREMENT: a textured humanoid (biped) model with a clear body and limbs, ≤300,000 faces (checked first; remesh if over). model_url must be a .glb facing +Z. Generate characters with pose_mode "t-pose" for the best rig.
 
-REQUIREMENT: a textured humanoid (biped) model with a clear body and limbs; untextured or non-humanoid models fail. model_url must be a .glb facing +Z.
-
-IMPORTANT: The source model should be generated with pose_mode="t-pose" for best rigging results. When the user asks to rig or animate, always ensure the generation step used t-pose. If the model was not generated with t-pose, recommend regenerating with pose_mode="t-pose" first.
-
-CONSTRAINT: Model must have ≤300,000 faces. This tool auto-checks and suggests remeshing if exceeded.
-
-Args:
-  - input_task_id (string, optional): Task ID of an existing completed task to rig
-  - model_url (string, optional): Direct URL to a model file to rig
-    (Provide either input_task_id or model_url)
-  - height_meters (number, optional): Height of the character in meters (default: 1.7)
-  - texture_image_url (string, optional): URL of a texture image to apply to the model
-  - response_format (enum): Output format - "markdown" or "json" (default: "markdown")
-
-Returns:
-  {
-    "task_id": "abc-123-def",
-    "status": "PENDING",
-    "message": "Rigging task created...",
-    "estimated_time": "2-3 minutes"
-  }
-
-Included with rigging (FREE):
-  - Walking animation (GLB + FBX)
-  - Running animation (GLB + FBX)
-
-Next steps: other actions → meshy_list_animations (find ids) → meshy_animate with rig_task_id; a described motion → meshy_text_to_motion → meshy_animate with motion_task_id.
-
-Examples:
-  - Basic rig: { input_task_id: "abc-123" }
-  - With height: { model_url: "https://...", height_meters: 1.8 }
-
-Error Handling:
-  - Returns "NotFound" if input_task_id doesn't exist
-  - Returns error if model exceeds 300K faces (suggests remeshing)
-  - Returns error if model is not suitable for rigging`,
+Next steps: meshy_download_model (task_type "rigging") returns the rigged model and walk/run URLs. Other actions: meshy_list_animations → meshy_animate. A described motion: meshy_text_to_motion → meshy_animate with motion_task_id.`,
       inputSchema: RigInputSchema,
       outputSchema: TaskCreatedOutputSchema,
       annotations: {
@@ -432,43 +331,11 @@ The model exceeds the ${maxFaces}-face limit for rigging.
     "meshy_animate",
     {
       title: "Animate Rigged 3D Character",
-      description: `Apply a CUSTOM animation to a rigged 3D character using Meshy AI. Cost: 3 credits per action.
+      description: `Animate a rigged character (rig_task_id). Cost: 3 credits per action. Give exactly ONE of action_id, action_ids or motion_task_id.
 
-NOTE: meshy_rig already returns walking and running free, as separate files. Use this tool for other actions; to get walk/run inside one multi-clip file, include their preset ids in action_ids (3 credits each).
+meshy_rig already returns walking and running free, as separate files; include their ids in action_ids only to bundle them into one multi-clip file. meshy_download_model (task_type "animation") returns the file URLs.
 
-Give exactly ONE animation source:
-  - action_id: one preset action. Find ids with meshy_list_animations (free) — never guess an id.
-  - action_ids: 1–10 unique preset ids, returned as ONE file with one clip per action, in the given order (3 credits each)
-  - motion_task_id: a SUCCEEDED meshy_text_to_motion task, retargeted onto the character (biped rigs only; apply within 3 days)
-
-Args:
-  - rig_task_id (string): Task ID of the completed rigging task (required)
-  - action_id (number) / action_ids (number[]) / motion_task_id (string): the animation source, exactly one
-  - post_process (object, optional): Optional post-processing to apply after animation:
-    - operation_type (enum): "change_fps", "fbx2usdz", or "extract_armature"
-    - fps (number, optional): Target FPS for change_fps operation (24, 25, 30, or 60)
-  - response_format (enum): Output format - "markdown" or "json" (default: "markdown")
-
-Returns:
-  {
-    "task_id": "abc-123-def",
-    "status": "PENDING",
-    "message": "Animation task created...",
-    "estimated_time": "1-2 minutes"
-  }
-
-Next Steps:
-  Use meshy_get_task_status with task_id and task_type="animation" to check progress.
-
-Examples:
-  - Basic animate: { rig_task_id: "abc-123", action_id: 1 }
-  - Several clips in one file: { rig_task_id: "abc-123", action_ids: [1, 4, 92] }
-  - Generated motion: { rig_task_id: "abc-123", motion_task_id: "def-456" }
-  - With FPS change: { rig_task_id: "abc-123", action_id: 1, post_process: { operation_type: "change_fps", fps: 30 } }
-
-Error Handling:
-  - Returns "NotFound" if rig_task_id doesn't exist
-  - Returns error if rig task is not yet completed`,
+Example: { rig_task_id: "abc-123", action_ids: [1, 4, 92] }`,
       inputSchema: AnimateInputSchema,
       outputSchema: TaskCreatedOutputSchema,
       annotations: {
@@ -534,22 +401,11 @@ Error Handling:
     "meshy_text_to_motion",
     {
       title: "Generate Motion Clip from Text",
-      description: `Generate a character motion clip from a text description. Cost: ${TEXT_TO_MOTION_CREDITS.prime} credits (prime) or ${TEXT_TO_MOTION_CREDITS.swift} (swift) — confirm with the user first.
+      description: `Generate a character motion clip (skeleton motion, not a model) from text. Cost: ${TEXT_TO_MOTION_CREDITS.prime} credits (prime) or ${TEXT_TO_MOTION_CREDITS.swift} (swift) — confirm first. Clips are kept for 3 days.
 
-The clip is skeleton motion, not a model. Apply it to a rigged character with meshy_animate (motion_task_id), or download it (meshy_download_model saves the FBX / BVH clip and ignores format) for your own retargeting. Clips are kept for 3 days.
+Apply it to a rigged biped with meshy_animate (motion_task_id), or save the clip with meshy_download_model (FBX for prime, BVH for swift; format is ignored).
 
-Args:
-  - prompt (string): the motion, max 400 characters (required)
-  - duration (number): seconds, 2–10 in steps of 0.5 (required)
-  - mode (enum, optional): "prime" (default, highest quality, FBX, 10 credits) or "swift" (faster, BVH, 3 credits)
-  - response_format (enum): "markdown" or "json" (default: "markdown")
-
-Next Steps:
-  meshy_get_task_status with task_type "text-to-motion", then meshy_animate with motion_task_id (biped rig), or meshy_download_model.
-
-Examples:
-  - { prompt: "a boxer throws a jab-cross combo", duration: 4 }
-  - Quick draft: { prompt: "a happy skip forward", duration: 3, mode: "swift" }`,
+Example: { prompt: "a boxer throws a jab-cross combo", duration: 4 }`,
       inputSchema: TextToMotionInputSchema,
       outputSchema: TaskCreatedOutputSchema,
       annotations: {
@@ -592,22 +448,9 @@ Examples:
     "meshy_list_animations",
     {
       title: "Find Animation Actions",
-      description: `Look up preset animations in Meshy's animation library — the action ids meshy_animate takes. Free.
+      description: `Look up preset animations: the action ids meshy_animate takes. Free. Filters combine; with none the whole (long) library comes back, so prefer search or category.
 
-Filters combine (each narrows the result); with no filter the whole library is returned, which is long, so prefer search or category.
-
-Args:
-  - search (string, optional): substring of the name or key, e.g. "walk", "punch", "dance"
-  - category (enum, optional): "WalkAndRun", "BodyMovements", "DailyActions", "Fighting", "Dancing"
-  - sub_category (string, optional): e.g. "AttackingwithWeapon"
-  - action_ids (number[], optional): resolve specific ids (missing ones are retired)
-  - response_format (enum): "markdown" or "json" (default: "markdown")
-
-Returns: [{ action_id, name, key, category, sub_category, preview_url }] — preview_url is an animated GIF of the action.
-
-Examples:
-  - { search: "jump" }
-  - { category: "Dancing" }`,
+Returns [{ action_id, name, key, category, sub_category, preview_url }]; preview_url is an animated GIF.`,
       inputSchema: ListAnimationsInputSchema,
       annotations: {
         readOnlyHint: true,

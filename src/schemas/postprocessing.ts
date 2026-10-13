@@ -13,46 +13,46 @@ export const RemeshInputSchema = z.object({
   input_task_id: z.string()
     .min(1)
     .optional()
-    .describe("ID of a SUCCEEDED text-to-3d (preview or refine), image-to-3d or retexture task to remesh"),
+    .describe("A SUCCEEDED text-to-3d (preview or refine), image-to-3d or retexture task"),
   model_url: UrlSchema
     .optional()
-    .describe("Public URL of a model to remesh (.glb / .gltf / .obj / .fbx / .stl, max 100 MB), or a GLB data URI"),
+    .describe("Public URL of a .glb / .gltf / .obj / .fbx / .stl model (max 100 MB), or a GLB data URI"),
   target_formats: z.array(z.enum(["glb", "fbx", "obj", "usdz", "blend", "stl", "3mf"]))
     .default(["glb"])
-    .describe("Output formats to generate (default: ['glb']): glb, fbx, obj, usdz, blend, stl, 3mf. 3MF is only produced when listed."),
+    .describe("Formats to produce (default ['glb'])."),
   topology: z.nativeEnum(Topology)
     .optional()
-    .describe("Mesh topology type (quad or triangle)"),
+    .describe("quad or triangle (default)"),
   target_polycount: z.number()
     .int()
     .min(100, "Polycount must be at least 100")
     .max(300000, "Polycount cannot exceed 300,000")
     .optional()
-    .describe("Target polygon count for the remeshed model (100–300,000)"),
+    .describe("100–300,000 (default 30,000)"),
   decimation_mode: z.number()
     .int()
     .min(1)
     .max(4)
     .optional()
-    .describe("Adaptive decimation polycount level (1=ultra, 2=high, 3=medium, 4=low). When set, target_polycount is ignored."),
+    .describe("Adaptive decimation 1 (ultra) – 4 (low); overrides target_polycount."),
   resize_height: z.number()
     .optional()
-    .describe("DEPRECATED — use meshy_resize. Resize the model to this height in meters. Not combinable with auto_size."),
+    .describe("Deprecated: use meshy_resize."),
   resize_longest_side: z.number()
     .optional()
-    .describe("DEPRECATED — use meshy_resize. Resize so the longest side matches this value in meters."),
+    .describe("Deprecated: use meshy_resize."),
   auto_size: z.boolean()
     .optional()
-    .describe("DEPRECATED — use meshy_resize. Estimate the real-world height with AI and resize to it."),
+    .describe("Deprecated: use meshy_resize."),
   origin_at: z.nativeEnum(OriginAt)
     .optional()
-    .describe("DEPRECATED — use meshy_resize. Origin position: 'bottom' or 'center'."),
+    .describe("Deprecated: use meshy_resize."),
   convert_format_only: z.boolean()
     .optional()
-    .describe("DEPRECATED — use meshy_convert (1 credit instead of 5). Only change the file format, ignoring remesh options."),
+    .describe("Deprecated: use meshy_convert."),
   alpha_thumbnail: z.boolean()
     .optional()
-    .describe("Also render a transparent-background (RGBA) preview, returned as alpha_thumbnail_url. Default false."),
+    .describe("Also return a transparent-background preview (alpha_thumbnail_url)."),
   response_format: ResponseFormatSchema
 }).strict();
 
@@ -63,46 +63,46 @@ export const RetextureInputSchema = z.object({
   input_task_id: z.string()
     .min(1)
     .optional()
-    .describe("Task ID of an existing completed task to retexture"),
+    .describe("A SUCCEEDED text-to-3d (preview or refine), image-to-3d or remesh task"),
   model_url: UrlSchema
     .optional()
-    .describe("Direct URL to a model file to retexture"),
+    .describe("Public URL of a .glb / .gltf / .obj / .fbx / .stl model (max 100 MB), or a GLB data URI"),
   text_style_prompt: z.string()
     .max(800, "Prompt must not exceed 800 characters")
     .optional()
-    .describe("Text prompt describing the desired texture style. Max 800 characters. Mutually exclusive with image_style_url and multiview_image_urls — provide exactly one style input."),
+    .describe("The texture style in words (max 800 characters)."),
   image_style_url: UrlSchema
     .optional()
-    .describe("URL of a SINGLE image to use as texture style reference. Mutually exclusive with text_style_prompt and multiview_image_urls."),
+    .describe("One image used as the style reference."),
   multiview_image_urls: z.array(UrlSchema)
     .min(1, "Provide at least 1 view")
     .max(4, "At most 4 views are accepted")
     .optional()
-    .describe("1–4 ordered views OF THE SAME OBJECT (not style references) — element 0 is the primary reference and alone drives the metallic/roughness prediction. Runs on Meshy 7 (the tool sends ai_model 'meshy-7' for you when ai_model is 'latest'). Mutually exclusive with text_style_prompt and image_style_url."),
+    .describe("1–4 ordered views of the same object; element 0 is primary and alone drives metallic/roughness. Needs Meshy 7 ('latest' is sent as 'meshy-7')."),
   ai_model: z.enum([AIModel.MESHY_6_LITE, AIModel.MESHY_6, AIModel.MESHY_7, AIModel.LATEST])
     .default(AIModel.LATEST)
-    .describe("AI model: 'latest' (default, = Meshy 7), 'meshy-7', 'meshy-6', or 'meshy-6-lite' (fast, 2K textures only). No meshy-7.1 on retexture. multiview_image_urls needs Meshy 7. Texturing costs 10 credits at 2K/4K, 15 at 8K."),
+    .describe("'latest' (default, = Meshy 7), 'meshy-7', 'meshy-6', or 'meshy-6-lite' (fast, 2K only). No meshy-7.1 here."),
   enable_original_uv: z.boolean()
     .optional()
-    .describe("Keep the model's existing UV layout instead of unwrapping fresh UVs. Default: true with input_task_id (Meshy-generated UVs are reused), API default false with model_url (fresh unwrap, safest for uploads without good UVs)."),
+    .describe("Keep the existing UVs instead of a fresh unwrap. Default true with input_task_id, false with model_url (safest for uploads)."),
   enable_pbr: z.boolean()
     .default(false)
-    .describe("Enable physically-based rendering textures"),
+    .describe("Also make metallic/roughness/normal maps."),
   texture_resolution: z.nativeEnum(TextureResolution)
     .optional()
-    .describe("Base color texture resolution: '2k' (default), '4k', or '8k'. 8K costs 15 credits instead of 10 — confirm with the user before selecting it. 4k/8k need meshy-6 / meshy-7 / latest (not meshy-6-lite); at 8k the PBR maps are 4K and there is no emission map. Replaces the deprecated hd_texture flag."),
+    .describe("Base color texture: 2k (default), 4k or 8k (15 credits instead of 10; PBR maps stay 4K, no emission map). 4k/8k not on meshy-6-lite."),
   hd_texture: z.boolean()
     .optional()
-    .describe("DEPRECATED — use texture_resolution instead (hd_texture: true is exactly texture_resolution: '4k'). Kept for backward compatibility."),
+    .describe("Deprecated: use texture_resolution '4k'."),
   remove_lighting: z.boolean()
     .optional()
-    .describe("Removes highlights and shadows from the base color texture for cleaner results under custom lighting. Only honored on meshy-6 (API default true there); not sent for other models."),
+    .describe("Remove highlights/shadows from the base color (meshy-6 only; API default true there)."),
   target_formats: z.array(z.enum(["glb", "obj", "fbx", "stl", "usdz", "3mf"]))
     .optional()
-    .describe("Output formats to generate. When omitted, produces glb/obj/fbx/stl/usdz but NOT 3mf. To get 3MF, you MUST include '3mf' explicitly."),
+    .describe("Formats to produce (default: all but 3mf; list '3mf' to get it)."),
   alpha_thumbnail: z.boolean()
     .optional()
-    .describe("Also render a transparent-background (RGBA) preview, returned as alpha_thumbnail_url. Default false."),
+    .describe("Also return a transparent-background preview (alpha_thumbnail_url)."),
   response_format: ResponseFormatSchema
 }).strict();
 
@@ -113,16 +113,16 @@ export const RigInputSchema = z.object({
   input_task_id: z.string()
     .min(1)
     .optional()
-    .describe("Task ID of an existing completed task to rig"),
+    .describe("A SUCCEEDED task with a textured humanoid model"),
   model_url: UrlSchema
     .optional()
-    .describe("Direct URL to a model file to rig"),
+    .describe("Public URL of a textured humanoid .glb (max 100 MB), or a GLB data URI"),
   height_meters: z.number()
     .default(1.7)
-    .describe("Height of the character in meters (default: 1.7)"),
+    .describe("Character height in meters; helps scaling"),
   texture_image_url: UrlSchema
     .optional()
-    .describe("URL of a texture image to apply to the model"),
+    .describe("The model's UV-unwrapped base color texture (.png, max 20 MB)"),
   response_format: ResponseFormatSchema
 }).strict();
 
@@ -132,24 +132,24 @@ export const RigInputSchema = z.object({
 export const AnimateInputSchema = z.object({
   rig_task_id: z.string()
     .min(1, "Rig task ID is required")
-    .describe("Task ID of the completed rigging task to animate"),
+    .describe("The SUCCEEDED rigging task"),
   action_id: z.number()
     .int("Action ID must be an integer")
     .optional()
-    .describe("One preset action from the animation library (look ids up with meshy_list_animations). Give exactly one of action_id, action_ids, motion_task_id."),
+    .describe("One preset action; find ids with meshy_list_animations (free), never guess."),
   action_ids: z.array(z.number().int())
     .min(1)
     .max(10)
     .refine(ids => new Set(ids).size === ids.length, "action_ids must be unique")
     .optional()
-    .describe("1–10 unique preset action ids, returned as ONE file with one clip per action (in this order) — e.g. for a game-engine state machine. 3 credits per action."),
+    .describe("1–10 unique preset ids, returned as ONE file with one clip per action, in this order (e.g. for a game-engine state machine)."),
   motion_task_id: z.string()
     .min(1)
     .optional()
-    .describe("A SUCCEEDED meshy_text_to_motion task whose clip to apply (biped rigs only; apply it within 3 days, before the clip expires)."),
+    .describe("A SUCCEEDED meshy_text_to_motion task (biped rigs only; within 3 days, before the clip expires)."),
   post_process: z.object({
     operation_type: z.nativeEnum(AnimationPostProcessOp)
-      .describe("Post-processing operation to apply"),
+      .describe("change_fps (with fps), fbx2usdz or extract_armature"),
     fps: z.union([
       z.literal(24),
       z.literal(25),
@@ -157,10 +157,10 @@ export const AnimateInputSchema = z.object({
       z.literal(60)
     ])
       .optional()
-      .describe("Target FPS for change_fps operation")
+      .describe("Target FPS for change_fps")
   })
     .optional()
-    .describe("Optional post-processing to apply after animation"),
+    .describe("Optional post-processing"),
   response_format: ResponseFormatSchema
 }).strict();
 
@@ -171,7 +171,7 @@ export const TextToMotionInputSchema = z.object({
   prompt: z.string()
     .min(1, "Prompt is required")
     .max(400, "Prompt must not exceed 400 characters")
-    .describe("Natural-language description of the motion, e.g. 'a character jumps over a gap and lands in a crouch'. Max 400 characters."),
+    .describe("The motion, e.g. 'jumps over a gap and lands in a crouch' (max 400 characters)."),
   duration: z.number()
     .min(2, "Duration must be at least 2 seconds")
     .max(10, "Duration cannot exceed 10 seconds")
@@ -179,7 +179,7 @@ export const TextToMotionInputSchema = z.object({
     .describe("Clip length in seconds: 2–10 in steps of 0.5."),
   mode: z.enum(["prime", "swift"])
     .optional()
-    .describe("'prime' (API default): highest quality, FBX, 10 credits. 'swift': faster and cheaper, BVH, 3 credits."),
+    .describe("'prime' (default): highest quality, FBX. 'swift': faster and cheaper, BVH."),
   response_format: ResponseFormatSchema
 }).strict();
 

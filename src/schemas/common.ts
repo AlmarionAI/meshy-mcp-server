@@ -11,7 +11,7 @@ import { toTaskType } from "../utils/endpoints.js";
  */
 export const ResponseFormatSchema = z.nativeEnum(ResponseFormat)
   .default(ResponseFormat.MARKDOWN)
-  .describe("Output format: 'markdown' for human-readable or 'json' for machine-readable");
+  .describe("markdown (default) or json");
 
 /**
  * Pagination schema
@@ -22,12 +22,12 @@ export const PaginationSchema = z.object({
     .min(1, "Limit must be at least 1")
     .max(100, "Limit cannot exceed 100")
     .default(20)
-    .describe("Maximum number of results to return"),
+    .describe("Results per page, 1–100"),
   offset: z.number()
     .int()
     .min(0, "Offset cannot be negative")
     .default(0)
-    .describe("Number of results to skip for pagination")
+    .describe("Results to skip")
 });
 
 /**
@@ -35,7 +35,7 @@ export const PaginationSchema = z.object({
  */
 export const TaskIdSchema = z.string()
   .min(1, "Task ID is required")
-  .describe("Unique task identifier (UUID)");
+  .describe("Task ID");
 
 /**
  * URL schema

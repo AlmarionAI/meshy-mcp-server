@@ -26,37 +26,11 @@ export function registerImageTools(server: McpServer, client: MeshyClient) {
     "meshy_text_to_image",
     {
       title: "Generate 2D Image from Text",
-      description: `Generate a 2D image from a text description using Meshy AI.
+      description: `Generate a 2D image from text, e.g. a design for the user to approve before 3D. Typically ~30 s.
 
-Useful for creating reference images that can then be used with image-to-3d or image-to-image.
+To make it 3D: meshy_image_to_3d with input_task_id = this task (multi-view output: meshy_multi_image_to_3d).
 
-Args:
-  - ai_model (enum): "nano-banana" (3 credits), "nano-banana-2" (6), "nano-banana-2-lite" (3), "nano-banana-2-1" (4), "nano-banana-pro" (9), "gpt-image-2" / "gpt-image-2-5-flare" / "gpt-image-2-5-sunburst" (9) (required)
-  - prompt (string): Text description of the image to generate (required)
-  - generate_multi_view (boolean, optional): Generate multiple viewpoint images (default: false). Do not combine with aspect_ratio
-  - pose_mode (enum, optional): Pose for character images - "a-pose" or "t-pose"
-  - aspect_ratio (enum, optional): Image aspect ratio (API default: "1:1"). Options: "1:1", "16:9", "9:16", "4:3", "3:4"; "3:2" / "2:3" on GPT Image models only
-  - remove_background (boolean, optional): Transparent-background PNG (default false)
-  - response_format (enum): Output format - "markdown" or "json" (default: "markdown")
-
-Returns:
-  {
-    "task_id": "abc-123-def",
-    "status": "PENDING",
-    "message": "Image generation task created...",
-    "estimated_time": "~30 seconds"
-  }
-
-Next Steps:
-  Use meshy_get_task_status with task_id and task_type="text-to-image" to check progress, then show the image. To turn it into 3D: meshy_image_to_3d with input_task_id = this task (multi-view output: meshy_multi_image_to_3d).
-
-Examples:
-  - Basic image: { ai_model: "nano-banana", prompt: "a cute cartoon cat" }
-  - Widescreen: { ai_model: "nano-banana-pro", prompt: "fantasy landscape", aspect_ratio: "16:9" }
-  - Multi-view character: { ai_model: "nano-banana-pro", prompt: "game character", generate_multi_view: true }
-
-Error Handling:
-  - Returns "InsufficientCredits" if account needs upgrade`,
+Example: { ai_model: "nano-banana-pro", prompt: "game character", generate_multi_view: true, pose_mode: "t-pose" }`,
       inputSchema: TextToImageInputSchema,
       outputSchema: TaskCreatedOutputSchema,
       annotations: {
@@ -121,33 +95,11 @@ Error Handling:
     "meshy_image_to_image",
     {
       title: "Transform Image using AI",
-      description: `Transform images using AI with a text prompt and reference images using Meshy AI.
+      description: `Edit or restyle images with a text prompt. Give exactly ONE reference source: input_task_id (all images of an earlier image task), reference_file_paths (local files; never base64-encode them yourself) or reference_image_urls.
 
-Reference Image Input (provide ONE of these):
-  - input_task_id (string): a SUCCEEDED text-to-image / image-to-image task; all of its output images become the references
-  - reference_image_urls (array): 1–5 publicly accessible reference image URLs
-  - reference_file_paths (array): 1–5 absolute paths to LOCAL image files. Server reads and encodes them automatically.
+To make the result 3D: meshy_image_to_3d with input_task_id = this task (multi-view output: meshy_multi_image_to_3d).
 
-IMPORTANT: For local files, always use reference_file_paths instead of manually base64-encoding.
-
-Other Args:
-  - ai_model (enum): "nano-banana" (3 credits), "nano-banana-2" (6), "nano-banana-2-lite" (3), "nano-banana-2-1" (4), "nano-banana-pro" (9), "gpt-image-2" / "gpt-image-2-5-flare" / "gpt-image-2-5-sunburst" (12) (required)
-  - prompt (string): Text description guiding the transformation (required)
-  - generate_multi_view (boolean, optional): Generate multiple viewpoint images (default: false). Do not combine with aspect_ratio
-  - aspect_ratio (enum, optional): Output aspect ratio, same options as meshy_text_to_image
-  - remove_background (boolean, optional): Transparent-background PNG (default false)
-  - response_format (enum): Output format (default: "markdown")
-
-Next Steps: to turn the result into 3D, meshy_image_to_3d with input_task_id = this task (multi-view output: meshy_multi_image_to_3d).
-
-Examples:
-  - Local file: { ai_model: "nano-banana", prompt: "make it a robot", reference_file_paths: ["/path/to/image.jpg"] }
-  - Public URL: { ai_model: "nano-banana", prompt: "make it a robot", reference_image_urls: ["https://..."] }
-  - Edit an earlier result: { ai_model: "nano-banana-2", prompt: "make it red", input_task_id: "abc-123" }
-
-Error Handling:
-  - Returns "InvalidImageUrl" if any reference image is not accessible
-  - Returns "File not found" if any file_path doesn't exist`,
+Example: { ai_model: "nano-banana-2", prompt: "make it red", input_task_id: "abc-123" }`,
       inputSchema: ImageToImageInputSchema,
       outputSchema: TaskCreatedOutputSchema,
       annotations: {

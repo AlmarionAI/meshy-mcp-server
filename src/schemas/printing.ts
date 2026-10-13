@@ -13,15 +13,15 @@ import { ResponseFormatSchema, TaskIdSchema, UrlSchema } from "./common.js";
 const printSizeFields = {
   printer_type: z.enum(["fdm", "sla", "full_color"])
     .optional()
-    .describe("Printer you plan to use; sets the minimum wall for the wall-thickness check: fdm 1.0 mm, sla 0.8 mm, full_color 2.0 mm. Defaults to fdm when only a print size is sent."),
+    .describe("Sets the minimum wall: fdm 1.0 mm, sla 0.8 mm, full_color 2.0 mm (fdm when only a size is sent). Without a size: 150 mm tall for GLB / tasks, an STL's own size, else 150 mm longest side."),
   intended_print_height_mm: z.number()
     .min(1).max(1000)
     .optional()
-    .describe("Print height in mm (1–1000). GLB input only (any input_task_id counts as GLB). Send at most one print size."),
+    .describe("Print height in mm (1–1000); GLB / input_task_id only. At most one print size."),
   intended_print_longest_side_mm: z.number()
     .min(1).max(1000)
     .optional()
-    .describe("Length of the print's longest side in mm (1–1000). Works with every input format. Send at most one print size.")
+    .describe("Print's longest side in mm (1–1000); any format. At most one print size.")
 };
 
 export function checkPrintSize(params: { intended_print_height_mm?: number; intended_print_longest_side_mm?: number }): string | null {
@@ -35,7 +35,7 @@ export function checkPrintSize(params: { intended_print_height_mm?: number; inte
  */
 export const SendToSlicerInputSchema = z.object({
   model_url: UrlSchema
-    .describe("Download URL of the model file to send to slicer (can be a placeholder when only running detection)"),
+    .describe("The model's URL (a placeholder is fine when only detecting)"),
   slicer_type: z.enum([
     "auto",
     "bambu",
@@ -47,13 +47,13 @@ export const SendToSlicerInputSchema = z.object({
     "cura"
   ])
     .default("auto")
-    .describe("Target slicer. 'auto' (default) detects all installed slicers and recommends the best one. Specify a value to target a particular slicer."),
+    .describe("'auto' (default): detect all and recommend one; or one slicer."),
   file_name: z.string()
     .default("meshy_model.3mf")
-    .describe("File name for the model (default: meshy_model.3mf)"),
+    .describe("File name for the model"),
   is_multicolor: z.boolean()
     .default(false)
-    .describe("If true, only recommends multicolor-capable slicers (OrcaSlicer, Bambu Studio, Creality Print, Elegoo Slicer, Anycubic Slicer Next, PrusaSlicer)"),
+    .describe("Only multicolor-capable slicers"),
   response_format: ResponseFormatSchema
 }).strict();
 
@@ -67,9 +67,9 @@ export const SendToSlicerInputSchema = z.object({
  */
 export const AnalyzePrintabilityInputSchema = z.object({
   input_task_id: TaskIdSchema.optional()
-    .describe("ID of a SUCCEEDED task to analyze: text-to-3d, image-to-3d, multi-image-to-3d, remesh or retexture on Meshy 6 or newer (Meshy 7 / 7.1 included), or a print-repair task. Takes priority over model_url when both are given."),
+    .describe("A SUCCEEDED text-to-3d, image-to-3d, multi-image-to-3d, remesh or retexture task on Meshy 6 or newer, or a print-repair task. Wins over model_url."),
   model_url: UrlSchema.optional()
-    .describe("Public URL of a 3D model to analyze (.glb / .gltf / .obj / .fbx / .stl, max 100 MB), or a GLB data URI. Ignored when input_task_id is given."),
+    .describe("Public URL of a .glb / .gltf / .obj / .fbx / .stl model (max 100 MB), or a GLB data URI."),
   ...printSizeFields,
   response_format: ResponseFormatSchema
 }).strict();
@@ -80,13 +80,13 @@ export const AnalyzePrintabilityInputSchema = z.object({
  */
 export const RepairPrintabilityInputSchema = z.object({
   input_task_id: TaskIdSchema.optional()
-    .describe("ID of a SUCCEEDED task with a GLB: text-to-3d, image-to-3d, multi-image-to-3d, remesh, retexture, or a print-analyze task (an analyze task that checked wall thickness passes on its printer and size). Output will be GLB. Takes priority over model_url when both are given."),
+    .describe("A SUCCEEDED text-to-3d, image-to-3d, multi-image-to-3d, remesh or retexture task, or a print-analyze task (which passes on its printer and size). Wins over model_url."),
   model_url: UrlSchema.optional()
-    .describe("Public URL of a 3D model to repair (.glb / .stl / .obj / .fbx / .gltf, max 100 MB), or a GLB data URI. Output matches the input format. Ignored when input_task_id is given."),
+    .describe("Public URL of a .glb / .gltf / .obj / .fbx / .stl model (max 100 MB), or a GLB data URI."),
   ...printSizeFields,
   alpha_thumbnail: z.boolean()
     .optional()
-    .describe("Also render a transparent-background (RGBA) preview, returned as alpha_thumbnail_url. Default false."),
+    .describe("Also return a transparent-background preview (alpha_thumbnail_url)."),
   response_format: ResponseFormatSchema
 }).strict();
 
@@ -96,27 +96,27 @@ export const RepairPrintabilityInputSchema = z.object({
  */
 export const ProcessMulticolorInputSchema = z.object({
   input_task_id: TaskIdSchema.optional()
-    .describe("ID of a SUCCEEDED textured task: image-to-3d / multi-image-to-3d (textured unless should_texture was false), refined text-to-3d, remesh or retexture. Takes priority over model_url when both are given."),
+    .describe("A SUCCEEDED textured task: image-to-3d / multi-image-to-3d (unless should_texture was false), refined text-to-3d, remesh or retexture. Wins over model_url."),
   model_url: UrlSchema.optional()
-    .describe("Public URL of a textured 3D model (.glb / .fbx), or a GLB data URI. Ignored when input_task_id is given."),
+    .describe("Public URL of a textured .glb / .fbx, or a GLB data URI."),
   max_colors: z.number()
     .int()
     .min(1, "Minimum 1 color")
     .max(16, "Maximum 16 colors")
     .default(4)
-    .describe("Maximum number of colors in the output palette (1-16, default: 4). Match this to the user's printer AMS/MMU capability."),
+    .describe("Palette size (1–16); match the printer's AMS/MMU capacity."),
   max_depth: z.number()
     .int()
     .min(3, "Minimum depth 3")
     .max(6, "Maximum depth 6")
     .default(4)
-    .describe("Quadtree depth for color precision (3-6, default: 4). Higher = finer color boundaries but larger file. realistic style only."),
+    .describe("3–6: higher = finer color boundaries, larger file (realistic only)."),
   style: z.enum(["realistic", "cartoon"])
     .optional()
-    .describe("Color style: 'realistic' (API default; samples the texture for photo-like detail, larger file, needs one base color texture with UVs on every part) or 'cartoon' (flat uniform color regions, smaller file, also accepts vertex colors)."),
+    .describe("'realistic' (default): photo-like detail, larger file, needs one base color texture with UVs on every part. 'cartoon': flat regions, smaller file, also takes vertex colors."),
   printer_brand: z.enum(PRINTER_BRANDS)
     .optional()
-    .describe("Printer brand whose slicer preset (default printer, 0.4 mm nozzle) is written into the 3MF: bambu (API default), anycubic, creality, elegoo, flashforge, prusa, qidi, snapmaker, ankermake."),
+    .describe("Brand whose slicer preset (default printer, 0.4 mm nozzle) goes into the 3MF (default bambu)."),
   response_format: ResponseFormatSchema
 }).strict();
 
@@ -125,35 +125,35 @@ export const ProcessMulticolorInputSchema = z.object({
  */
 export const AutoSplitInputSchema = z.object({
   input_task_id: TaskIdSchema
-    .describe("ID of a SUCCEEDED image-to-3d, multi-image-to-3d, text-to-3d preview, remesh, convert or resize task whose model was made with meshy-6, meshy-7, meshy-7.1 or latest. Low-poly and Smart Topology (meshy-t2) models are not supported. A textured model is accepted; its texture is not carried into the result."),
+    .describe("A SUCCEEDED image-to-3d, multi-image-to-3d, text-to-3d preview, remesh, convert or resize task made with meshy-6, meshy-7, meshy-7.1 or latest (not low-poly or Smart Topology)."),
   mode: z.enum(["auto", "by_parts", "by_color"])
     .optional()
-    .describe("How to cut: 'auto' (API default; Meshy picks the cuts), 'by_parts' (the structural parts named in prompt), or 'by_color' (the color regions named in prompt; only for image-to-3d / multi-image-to-3d inputs)."),
+    .describe("'auto' (default; Meshy picks the cuts), 'by_parts' (the parts named in prompt), or 'by_color' (the color regions named in prompt; image-to-3d / multi-image-to-3d sources only)."),
   prompt: z.string()
     .min(1)
     .max(600)
     .optional()
-    .describe("Required for by_parts / by_color: name 1–10 parts, e.g. 'head, torso, left arm, right arm, legs' or 'the figure and the base'. Anything not named becomes one remaining part. Max 600 characters. Ignored in auto mode."),
+    .describe("Required for by_parts / by_color: name 1–10 parts, e.g. 'head, torso, arms, legs'; the rest becomes one more part. If unreadable, the task falls back to auto, still charges, and reports prompt_ignored."),
   target_formats: z.array(z.enum(["glb", "obj", "fbx", "stl", "usdz", "blend", "3mf"]))
     .optional()
-    .describe("Extra export formats (glb is always produced). glb/obj/fbx/usdz/blend/3mf keep each part as its own object; stl fuses the parts into one solid. Use 3mf for separately selectable parts in a slicer."),
+    .describe("Extra formats (glb is always made). 3mf gives separately selectable parts in a slicer; stl fuses them into one solid."),
   layout: z.enum(["assembled", "on_plate"])
     .optional()
-    .describe("'assembled' (API default; parts stay in place) or 'on_plate' (parts laid flat and spread out, ready to slice)."),
+    .describe("'assembled' (default) or 'on_plate' (parts laid flat, ready to slice)."),
   connectors: z.boolean()
     .optional()
-    .describe("Add mortise-and-tenon connectors at each cut so the printed parts fit together. Default false."),
+    .describe("Add mortise-and-tenon connectors at each cut so the parts fit together."),
   connector_type: z.enum(["cube", "cylinder"])
     .optional()
-    .describe("Connector shape when connectors is true (API default cube)."),
+    .describe("Connector shape (default cube)."),
   connector_size: z.number()
     .min(0.1).max(0.8)
     .optional()
-    .describe("Connector size relative to the cut surface, 0.1–0.8 (API default 0.5)."),
+    .describe("Relative to the cut surface (default 0.5)."),
   connector_height: z.number()
     .min(0.1).max(0.8)
     .optional()
-    .describe("How far the connector extends from the cut surface, relative to it, 0.1–0.8 (API default 0.1)."),
+    .describe("Relative extension from the cut (default 0.1)."),
   response_format: ResponseFormatSchema
 }).strict();
 

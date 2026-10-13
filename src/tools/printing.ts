@@ -68,36 +68,11 @@ export function registerPrintingTools(server: McpServer, client: MeshyClient) {
     "meshy_send_to_slicer",
     {
       title: "Send Model to 3D Printing Slicer",
-      description: `Detect installed 3D printing slicer software and return launch commands.
+      description: `Detect installed 3D printing slicers and return their launch commands. Call it at the START of a print workflow and keep the result; at the END, replace {file} in a launch_command with the downloaded file's local path and run it. If you cannot run shell commands, give the user the command and the file path.
 
-IMPORTANT: This tool should be called as the FIRST STEP in any 3D printing workflow — before generating the model. Save the result and reuse it at the end to open the model in the user's chosen slicer.
+Detects OrcaSlicer, Bambu Studio, Creality Print, Elegoo Slicer, Anycubic Slicer Next, PrusaSlicer (all multicolor-capable) and UltiMaker Cura.
 
-Supports 7 slicers: OrcaSlicer, Bambu Studio, Creality Print, Elegoo Slicer, Anycubic Slicer Next, PrusaSlicer, UltiMaker Cura.
-Multicolor-capable: OrcaSlicer, Bambu Studio, Creality Print, Elegoo Slicer, Anycubic Slicer Next, PrusaSlicer.
-
-Usage pattern:
-1. Call this tool at the START of a print workflow to detect slicers
-2. Present detected slicers to the user
-3. Generate, analyze, optionally repair / multicolor-process, and download the model
-4. At the END, take the launch_command, replace {file} with the local file path, execute via Bash. If you cannot run shell commands, give the user the command and the file path to run themselves.
-
-Args:
-  - model_url (string): Download URL of the model file (can be a placeholder at detection time)
-  - slicer_type (enum): 'auto' (default, detect all) or a specific slicer
-  - file_name (string): File name for the model (default: "meshy_model.3mf")
-  - is_multicolor (boolean): If true, only recommends multicolor-capable slicers (default: false)
-  - response_format (enum): "markdown" or "json" (default: "markdown")
-
-Returns:
-  {
-    "detected_slicers": [{"name": "OrcaSlicer", "launch_command": "open -a \\"OrcaSlicer\\" \\"{file}\\"", ...}],
-    "recommended_slicer": {"name": "...", "launch_command": "..."},
-    "model_url": "https://..."
-  }
-
-The launch_command contains {file} as placeholder. Replace it with the actual local file path before executing via Bash.
-
-MULTIPLE MODELS: when opening several SEPARATE/unrelated models in a slicer (e.g. results from different generation tasks), run their open commands ONE AT A TIME with a short delay (~1–2s) between them — e.g. \`open -a "Bambu Studio" "modelA.stl"; sleep 2; open -a "Bambu Studio" "modelB.stl"\`. Firing them at once can make the slicer (Bambu Studio especially) respond to only one. (Parts of a SINGLE model belong in one project — open those together, not spaced.)`,
+Several SEPARATE models: open them one at a time, ~2 s apart (\`open -a "Bambu Studio" a.stl; sleep 2; open -a "Bambu Studio" b.stl\`); fired together, a slicer may take only one. Parts of one model go in one project, opened together.`,
       inputSchema: SendToSlicerInputSchema,
       annotations: {
         readOnlyHint: true,
@@ -215,42 +190,14 @@ ${launchCmd}
     "meshy_analyze_printability",
     {
       title: "Analyze Model Printability",
-      description: `Run automated printability analysis (FDM, SLA/resin or full-color) on a 3D model. Cost: FREE (0 credits).
+      description: `Check whether a model is printable: watertightness, non-manifold edges, holes, degenerate faces and volume — plus thin walls when printer_type and/or a print size is given (FDM, SLA/resin or full-color). FREE. This is the authoritative answer to "is it printable?".
 
-This is the authoritative way to answer "is this model printable / suitable for 3D printing / ready to print?". Printability here means geometry validity — watertightness, manifold edges, holes, degenerate faces, and volume — measured by this check. It's free, so run it whenever printability is the question, then use the result to decide whether the mesh needs repair (\`meshy_repair_printability\`).
+The finished task (task_type "print-analyze") reports printability.status:
+  - error → meshy_repair_printability (pass this analyze task as input_task_id to reuse its printer and size)
+  - warning → repair is optional
+  - healthy → download the analyzed source task's model (the analyze task has none)
 
-Provide ONE of (input_task_id wins if both are given):
-  - input_task_id: a SUCCEEDED Meshy task. **Must use Meshy 6 or newer** (Meshy 7 / 7.1 included). Supported task types: text-to-3d, image-to-3d, multi-image-to-3d, remesh, retexture — and print-repair, to re-check a repaired model.
-  - model_url: a public URL of a 3D model file (.glb / .gltf / .obj / .fbx / .stl, max 100 MB) or a GLB data URI.
-
-Optional wall-thickness check at the size you plan to print (takes longer): send printer_type, one print size, or both. The result adds printability.thin_walls and intended_print.
-
-Args:
-  - input_task_id (string, optional): Upstream Meshy task ID
-  - model_url (string, optional): Public model URL
-  - printer_type (enum, optional): "fdm" (1.0 mm min wall), "sla" (0.8 mm), "full_color" (2.0 mm)
-  - intended_print_height_mm (number, optional): 1–1000, GLB / input_task_id only
-  - intended_print_longest_side_mm (number, optional): 1–1000, any format. Send at most one size.
-    With printer_type and no size: 150 mm tall for GLB / tasks, the file's own size for STL, 150 mm longest side otherwise
-  - response_format (enum): "markdown" or "json" (default: "markdown")
-
-Returns:
-  { "task_id": "...", "status": "PENDING", ... }
-
-Next Steps:
-  Use meshy_get_task_status with task_id and task_type="print-analyze" to wait for completion.
-  Once SUCCEEDED, the task object's \`printability\` field contains:
-    - status: "healthy" / "warning" / "error" / "unknown"
-    - issue_count, error_count, warning_count
-    - metrics: { is_watertight, volume, non_manifold_edges, degenerate_faces, holes }
-  - status="error" → call meshy_repair_printability before printing (pass this analyze task as its input_task_id to reuse the printer and size).
-  - status="warning" → repair is optional.
-  - status="healthy" → download the analyzed source task's model (the analyze task has none).
-
-Examples:
-  - From a task: { input_task_id: "abc-123" }
-  - From a URL:  { model_url: "https://example.com/model.glb" }
-  - Wall check for a 100 mm SLA print: { input_task_id: "abc-123", printer_type: "sla", intended_print_height_mm: 100 }`,
+Example: { input_task_id: "abc-123", printer_type: "sla", intended_print_height_mm: 100 }`,
       inputSchema: AnalyzePrintabilityInputSchema,
       annotations: {
         readOnlyHint: false,
@@ -308,40 +255,10 @@ Examples:
     "meshy_repair_printability",
     {
       title: "Repair Model Topology for 3D Printing",
-      description: `Repair a 3D model's topology for 3D printing (FDM, SLA/resin or full-color) — fixes non-manifold edges, degenerate faces, holes, and ensures watertightness. Cost: 10 credits.
+      description: `Repair a model for 3D printing (FDM, SLA/resin or full-color): fixes non-manifold edges, degenerate faces and holes and makes it watertight. Cost: 10 credits. Textures are removed (retexture afterwards if needed).
 
-Output format mirrors the input format:
-  - input_task_id → output is GLB
-  - model_url with .stl → output is STL
-  - model_url with .obj → output is OBJ
-  - model_url with .glb → output is GLB
-  - model_url with .fbx / .gltf → output is FBX / GLTF
-
-Provide ONE of (input_task_id wins if both are given):
-  - input_task_id: a SUCCEEDED Meshy task that produced a GLB asset (text-to-3d, image-to-3d, multi-image-to-3d, remesh, retexture), or a print-analyze task. An analyze task that checked wall thickness passes on its printer and size.
-  - model_url: a public URL of a 3D model (.glb / .gltf / .obj / .fbx / .stl, max 100 MB), or a GLB data URI. To keep a Meshy model as OBJ, pass the task's OBJ URL (model_urls.obj) here.
-
-To also thicken walls that are too thin at the planned print size, send printer_type, one print size, or both (same fields as meshy_analyze_printability). Walls are thickened only when more than 5% of the surface is too thin; the model keeps its scale (use meshy_resize to scale it).
-
-Args:
-  - input_task_id (string, optional): Upstream Meshy task ID
-  - model_url (string, optional): Public model URL
-  - printer_type (enum, optional): "fdm" / "sla" / "full_color"
-  - intended_print_height_mm / intended_print_longest_side_mm (number, optional): 1–1000 mm, at most one
-  - alpha_thumbnail (boolean, optional): also render a transparent-background preview
-  - response_format (enum): "markdown" or "json" (default: "markdown")
-
-Returns:
-  { "task_id": "...", "status": "PENDING", ... }
-
-Next Steps:
-  Use meshy_get_task_status with task_id and task_type="print-repair" to wait for completion.
-  Once SUCCEEDED, model_urls contains the repaired model in the same format as the input.
-  Note: textures are NOT preserved — repair operates on geometry only.
-
-Examples:
-  - From a task: { input_task_id: "abc-123" }
-  - From an STL: { model_url: "https://example.com/model.stl" }`,
+Output format: input_task_id → GLB; model_url → the input's format (.stl → STL, .obj → OBJ…). To keep a Meshy model as OBJ, pass its OBJ URL (model_urls.obj) as model_url.
+With printer_type and/or a print size it also thickens walls that are too thin, when over 5% of the surface is. The model keeps its scale (meshy_resize scales it).`,
       inputSchema: RepairPrintabilityInputSchema,
       annotations: {
         readOnlyHint: false,
@@ -396,45 +313,10 @@ Examples:
     "meshy_process_multicolor",
     {
       title: "Process Multi-Color 3D Print",
-      description: `Process a textured 3D model for multi-color 3D printing. Cost: 10 credits.
+      description: `Turn a textured model into a multi-color 3MF that opens ready to print in the slicer of printer_brand. Cost: 10 credits.
 
-Segments the model's texture into discrete color regions and creates a task that outputs a 3MF file that opens ready to print in the slicer of printer_brand (Bambu Studio, Anycubic Slicer Next, Creality Print, Elegoo Slicer, PrusaSlicer, OrcaSlicer…).
-
-PREREQUISITES:
-  - The input model MUST have textures: a textured image-to-3d / multi-image-to-3d task (should_texture left on), or texture it first with meshy_text_to_3d_refine or meshy_retexture.
-  - A multicolor-capable slicer should be installed on the user's system.
-
-IMPORTANT: Before calling, ask the user to confirm:
-  - max_colors: depends on their printer's multi-color capability (e.g. Bambu AMS supports 4-16 colors).
-  - style: "realistic" (default, photo-like detail, larger file) or "cartoon" (flat color regions, smaller file).
-  - printer_brand: whose slicer preset to write into the 3MF (default "bambu").
-  - max_depth (realistic only): color boundary precision vs. file size.
-
-Provide input_task_id or model_url (input_task_id wins if both are given).
-
-Args:
-  - input_task_id (string, optional): Task ID of a completed TEXTURED model. Takes priority over model_url.
-  - model_url (string, optional): Public URL of a textured .glb or .fbx model, or a GLB data URI.
-  - max_colors (number): Max colors for segmentation (1-16, default: 4). MUST confirm with user based on their printer capability.
-  - max_depth (number): Segmentation depth (3-6, default: 4). Higher = finer separation, larger file. realistic style only.
-  - style (enum, optional): "realistic" or "cartoon". realistic needs one base color texture with UVs on every part; cartoon also accepts vertex colors
-  - printer_brand (enum, optional): "bambu" (default), "anycubic", "creality", "elegoo", "flashforge", "prusa", "qidi", "snapmaker", "ankermake"
-  - response_format (enum): "markdown" or "json" (default: "markdown")
-
-Returns:
-  { "task_id": "...", "status": "PENDING", ... }
-
-Next Steps:
-  1. Use meshy_get_task_status with task_id and task_type="multi-color-print" to wait for completion
-  2. The completed task will have a 3MF download URL in model_urls
-  3. Use meshy_download_model with format="3mf" to download
-  4. Use meshy_send_to_slicer with is_multicolor=true to open the 3MF in a multicolor slicer. Flashforge, QIDI, Snapmaker and AnkerMake slicers are not detected: give the user the 3MF path to open in that slicer
-
-Examples:
-  - Default: { input_task_id: "abc-123" }
-  - Custom: { input_task_id: "abc-123", max_colors: 8, max_depth: 5 }
-  - From URL: { model_url: "https://example.com/textured.glb", max_colors: 6 }
-  - Creality preset, flat colors: { input_task_id: "abc-123", style: "cartoon", printer_brand: "creality" }`,
+Confirm first: max_colors (the printer's AMS/MMU capacity), style, printer_brand, and max_depth (realistic only).
+Download with format "3mf", then open it with meshy_send_to_slicer (is_multicolor). Flashforge, QIDI, Snapmaker and AnkerMake slicers are not detected: give the user the 3MF path for that slicer.`,
       inputSchema: ProcessMulticolorInputSchema,
       annotations: {
         readOnlyHint: false,
@@ -491,27 +373,12 @@ Examples:
     "meshy_auto_split",
     {
       title: "Auto Split Model into Printable Parts",
-      description: `Cut a generated model into separately printable parts. Cost: ${AUTO_SPLIT_CREDITS} credits.
+      description: `Cut a model into separately printable parts: when it is too big for the bed, parts need different colors/materials, or it should be assembled. Cost: ${AUTO_SPLIT_CREDITS} credits. The texture is not kept.
 
-Use when a model is too big for the print bed, needs parts printed in different colors/materials, or should be assembled after printing. There is no bed-size parameter: the cuts follow mode/prompt, not your printer, so scale the model to the print size first (meshy_resize) when parts must fit a bed.
+There is no bed-size parameter: cuts follow mode and prompt, not your printer, so resize the model to the print size first (meshy_resize) when parts must fit a bed.
+Then meshy_download_model (3mf if requested) and meshy_send_to_slicer.
 
-Input: input_task_id of a SUCCEEDED image-to-3d, multi-image-to-3d, text-to-3d preview, remesh, convert or resize task made with meshy-6, meshy-7, meshy-7.1 or latest (not low-poly, not Smart Topology). A textured model is accepted, but the texture is not kept.
-
-Args:
-  - input_task_id (string, required)
-  - mode (enum, optional): "auto" (default, Meshy chooses the cuts), "by_parts" (cut along parts named in prompt), "by_color" (cut along color regions named in prompt; image-to-3d / multi-image-to-3d inputs only)
-  - prompt (string): required for by_parts / by_color. Name 1–10 parts ("head, torso, arms, legs"); unnamed geometry becomes one remaining part. If Meshy cannot read the prompt it falls back to auto, still charges, and the task reports prompt_ignored: true
-  - target_formats (string[], optional): extra formats; glb is always produced. Use "3mf" for separately selectable parts in a slicer ("stl" fuses all parts into one solid)
-  - layout (enum, optional): "assembled" (default) or "on_plate" (parts laid flat, ready to slice)
-  - connectors (boolean, optional): add mortise-and-tenon connectors at the cuts; connector_type "cube" | "cylinder", connector_size and connector_height 0.1–0.8
-  - response_format (enum): "markdown" or "json" (default: "markdown")
-
-Next Steps:
-  meshy_get_task_status with task_type "print-split" (the result reports part_count), then meshy_download_model (3mf if requested), then meshy_send_to_slicer to open the parts.
-
-Examples:
-  - { input_task_id: "abc-123" }
-  - { input_task_id: "abc-123", mode: "by_parts", prompt: "the figure and the base", target_formats: ["3mf"], connectors: true }`,
+Example: { input_task_id: "abc-123", mode: "by_parts", prompt: "the figure and the base", target_formats: ["3mf"], connectors: true }`,
       inputSchema: AutoSplitInputSchema,
       outputSchema: TaskCreatedOutputSchema,
       annotations: {

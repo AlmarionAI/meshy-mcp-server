@@ -38,22 +38,9 @@ export function registerConversionTools(server: McpServer, client: MeshyClient) 
     "meshy_convert",
     {
       title: "Convert 3D Model Format",
-      description: `Convert an existing 3D model into one or more file formats. Cost: 1 credit (cheaper than remesh for format-only conversion).
+      description: `Convert a model to other file formats. Cost: 1 credit (cheaper than remesh for a format-only change).
 
-Provide input_task_id or model_url (input_task_id wins if both are given), plus target_formats.
-
-Args:
-  - input_task_id (string, optional): SUCCEEDED Meshy task whose model to convert. Takes priority over model_url when both are given.
-  - model_url (string, optional): Public URL of a model (.glb / .gltf / .obj / .fbx / .stl), or a GLB data URI. Ignored when input_task_id is given.
-  - target_formats (array, REQUIRED): Output formats. Options: glb, fbx, obj, usdz, blend, stl, 3mf.
-  - response_format (enum): "markdown" or "json" (default: "markdown")
-
-Next Steps:
-  Use meshy_get_task_status with task_id and task_type="convert" to wait for completion, then meshy_download_model.
-
-Examples:
-  - To STL+3MF for printing: { input_task_id: "abc-123", target_formats: ["stl", "3mf"] }
-  - From a URL:               { model_url: "https://example.com/model.glb", target_formats: ["fbx"] }`,
+Example: { input_task_id: "abc-123", target_formats: ["stl", "3mf"] }`,
       inputSchema: ConvertInputSchema,
       outputSchema: TaskCreatedOutputSchema,
       annotations: {
@@ -101,28 +88,11 @@ Examples:
     "meshy_resize",
     {
       title: "Resize 3D Model to Real-World Dimensions",
-      description: `Resize an existing 3D model to real-world dimensions. Cost: 1 credit.
+      description: `Rescale a model to real-world size on Meshy. Cost: 1 credit. Give exactly one of resize_height, resize_longest_side or auto_size.
 
-This rescales the model on Meshy, so later tasks (e.g. Auto Split) use the new size. To only scale a downloaded OBJ for a slicer, meshy_download_model with print_ready + print_height_mm does it locally for free.
+Later tasks (e.g. Auto Split) use the new size. To only scale a downloaded OBJ for a slicer, meshy_download_model with print_ready + print_height_mm does it locally for free.
 
-Provide input_task_id or model_url (input_task_id wins if both are given), AND exactly one resize mode.
-
-Args:
-  - input_task_id (string, optional): SUCCEEDED Meshy task (output is GLB). Takes priority over model_url when both are given.
-  - model_url (string, optional): Public URL of a model (.glb / .gltf / .obj / .fbx / .stl), or a GLB data URI; output preserves input format. Ignored when input_task_id is given.
-  - resize_height (number, optional): Exact height in meters.
-  - resize_longest_side (number, optional): Longest side in meters (aspect ratio preserved).
-  - auto_size (boolean, optional): AI-estimate the real-world height and resize.
-    (Provide EXACTLY ONE of resize_height / resize_longest_side / auto_size.)
-  - origin_at (enum, optional): "bottom" (default) or "center".
-  - response_format (enum): "markdown" or "json" (default: "markdown")
-
-Next Steps:
-  Use meshy_get_task_status with task_id and task_type="resize" to wait for completion.
-
-Examples:
-  - 5 cm tall figurine: { input_task_id: "abc-123", resize_height: 0.05 }
-  - Auto-size:          { model_url: "https://example.com/model.glb", auto_size: true }`,
+Example (5 cm figurine): { input_task_id: "abc-123", resize_height: 0.05 }`,
       inputSchema: ResizeInputSchema,
       outputSchema: TaskCreatedOutputSchema,
       annotations: {
@@ -183,23 +153,9 @@ Examples:
     "meshy_uv_unwrap",
     {
       title: "Generate UV Unwrap for a 3D Model",
-      description: `Generate a clean, non-overlapping UV layout ("UV white model") for an existing 3D model — the prerequisite step before external texturing (Blender, Substance Painter, Unreal). Cost: 5 credits.
+      description: `Make a clean, non-overlapping UV layout ("UV white model") before texturing in Blender, Substance Painter or Unreal. Cost: 5 credits.
 
-The output preserves the input geometry with fresh UV coordinates and a placeholder grey material (treated as untextured by standard tools). Quad/n-gon meshes are triangulated.
-
-LIMITS: GLB only; meshes over 40,000 faces are rejected with 400 — run meshy_remesh first to reduce polycount.
-
-Provide ONE of (input_task_id wins if both are given):
-  - input_task_id (string, optional): SUCCEEDED Meshy task that produced a GLB (≤40k faces). Takes priority over model_url when both are given.
-  - model_url (string, optional): Public URL or data URI of a .glb model (≤40k faces). Ignored when input_task_id is given.
-  - response_format (enum): "markdown" or "json" (default: "markdown")
-
-Next Steps:
-  Use meshy_get_task_status with task_id and task_type="uv-unwrap" to wait for completion, then meshy_download_model (format "glb").
-
-Examples:
-  - From a task: { input_task_id: "abc-123" }
-  - From a URL:  { model_url: "https://example.com/model.glb" }`,
+GLB input only, ≤40,000 faces (denser meshes are rejected: remesh first). The output GLB keeps the geometry (quads/n-gons triangulated) with fresh UVs and a grey placeholder material.`,
       inputSchema: UvUnwrapInputSchema,
       outputSchema: TaskCreatedOutputSchema,
       annotations: {

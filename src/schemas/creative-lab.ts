@@ -32,52 +32,52 @@ export const CREATIVE_LAB_OPTION_PRODUCTS: readonly CreativeLabProduct[] = [
 
 export const CreativeLabInputSchema = z.object({
   product: z.nativeEnum(CreativeLabProduct)
-    .describe("Creative Lab product: 'figure' (chibi collectible), 'lamp' (3D-printable lampshade), 'keychain', 'fridge-magnet', 'vinyl-figure' (vinyl-toy style), 'brick-figure' (brick-minifigure style), 'keycap' (Cherry MX 1u keycap — 62 credits), 'fidget-pixel' (pixel-art board of interlocking pieces, 3MF) or 'fidget-collapsible' (nested-ring collapsible fidget, single stage, 6 credits)."),
+    .describe("The product (see the tool description for costs)."),
   image_url: z.string()
     .optional()
-    .describe("PUBLIC image URL or data URI of the source photo (.jpg/.jpeg/.png/.webp). For local files use file_path instead."),
+    .describe("Public URL or data URI of the photo (.jpg/.jpeg/.png/.webp). For local files use file_path."),
   file_path: z.string()
     .optional()
-    .describe("ABSOLUTE path to a LOCAL source photo (.jpg/.jpeg/.png/.webp). PREFERRED for local files; the server auto-encodes it."),
+    .describe("Absolute path to a local photo; the server encodes it."),
   image_subject: z.enum(["character", "landscape"])
     .optional()
-    .describe("Lamp only: subject type of the input image, 'character' or 'landscape'."),
+    .describe("Lamp only: what the photo shows."),
   pixel_subject: z.enum(["person", "other"])
     .optional()
-    .describe("Fidget pixel only, REQUIRED: what the photo shows. 'person' makes a chibi pixel sprite; 'other' (pets, objects, logos, landscapes) makes a bead-art pixel icon."),
+    .describe("fidget-pixel only, REQUIRED: 'person' → chibi pixel sprite; 'other' (pets, objects, logos, landscapes) → bead-art icon."),
   name_text: z.string()
     .refine(text => [...text.trim()].length <= 10, "name_text must be at most 10 characters")
     .optional()
-    .describe("Keychain only: text to engrave, e.g. a name. At most 10 characters (CJK counts one per character). Omit for no engraving."),
+    .describe("Keychain only: text to engrave, ≤10 characters (CJK count one each)."),
   head_size_mm: z.number()
     .min(10, "head_size_mm must be at least 10")
     .max(40, "head_size_mm cannot exceed 40")
     .optional()
-    .describe("Keycap only: scales the head's LONGEST edge to this many millimetres (10–40, default 23). This is NOT the height above the base."),
+    .describe("Keycap only: the head's LONGEST edge in mm (default 23), not its height."),
   vertical_offset_mm: z.number()
     .min(-5, "vertical_offset_mm must be at least -5")
     .max(5, "vertical_offset_mm cannot exceed 5")
     .optional()
-    .describe("Keycap only: raise (+) or lower (-) the head before it is seated on the base, in mm (-5 to 5, default 0)."),
+    .describe("Keycap only: raise (+) or lower (-) the head on the base, in mm (default 0)."),
   base_model: z.literal(KEYCAP_BASE_MODEL)
     .optional()
-    .describe(`Keycap only: keycap base profile. '${KEYCAP_BASE_MODEL}' (Cherry MX 1u) is the only value supported today.`),
+    .describe("Keycap only: base profile (Cherry MX 1u)."),
   build_options: z.record(z.union([z.string(), z.number(), z.boolean()]))
     .optional()
-    .describe("Build-stage options, sent as the API's `options` object (the API checks ranges). Keychain / fridge-magnet: badge_shape (circle|rounded-rect|hexagon|shield|star), size_mm, relief_height_mm, relief_offset_mm, base_thickness_mm, has_closed_back, relief_curve (linear|gamma|s-curve), curve_param, invert_depth, smoothing, relief_scale, depth_threshold, remove_background, export_resolution. Lamp: diameter_mm (50–400), thickness_mm, cut_amount_percent, light_source_preset (bambu_mh001_60mm|none), fixture_offset_x_mm, fixture_offset_z_mm, rotate_x_deg, rotate_y_deg, rotate_z_deg, include_result_json. Fidget pixel: shape (square|hex), grid_size (16|32), piece_size_mm (6|8|10; hex 6|8 only), color_count (1–8), piece_height_mm (10–80). Keycap: use head_size_mm / vertical_offset_mm / base_model instead. Other products take no options."),
+    .describe("Build options (the API checks ranges). Keychain / fridge-magnet: badge_shape (circle|rounded-rect|hexagon|shield|star), size_mm, relief_height_mm, relief_offset_mm, base_thickness_mm, has_closed_back, relief_curve (linear|gamma|s-curve), curve_param, invert_depth, smoothing, relief_scale, depth_threshold, remove_background, export_resolution. Lamp: diameter_mm (50–400), thickness_mm, cut_amount_percent, light_source_preset (bambu_mh001_60mm|none), fixture_offset_x_mm, fixture_offset_z_mm, rotate_x_deg, rotate_y_deg, rotate_z_deg, include_result_json. Fidget pixel: shape (square|hex), grid_size (16|32), piece_size_mm (6|8|10; hex 6|8), color_count (1–8), piece_height_mm (10–80). Other products take none."),
   output_format: z.enum(["glb", "obj", "zip", "stl", "3mf"])
     .optional()
-    .describe("Build output, sent as `output.format`. Keychain / fridge-magnet: glb (default), obj (zip of OBJ + MTL + texture) or zip (every artifact). Lamp: stl (default; lamp_stl + base_stl) or zip. Fidget pixel: 3mf only. Other products take no output format."),
+    .describe("Keychain / fridge-magnet: glb (default), obj (zip of OBJ + MTL + texture) or zip (everything). Lamp: stl (default) or zip. Fidget pixel: 3mf. Others: none."),
   name: z.string()
     .max(100, "Name must not exceed 100 characters")
     .optional()
-    .describe("Optional display name for the task (≤100 chars). Not engraved on anything — use name_text for a keychain engraving."),
+    .describe("Display name for the task; not engraved (see name_text)."),
   timeout_seconds: z.number()
     .int()
     .min(30, "Timeout must be at least 30 seconds")
     .max(600, "Timeout cannot exceed 600 seconds")
     .default(300)
-    .describe("Max seconds to wait for EACH stage (prototype, then build) before returning. Default 300. A stage that runs longer keeps running; check it with meshy_get_task_status."),
+    .describe("Max wait per stage in seconds; a longer stage keeps running (check it with meshy_get_task_status)."),
   response_format: ResponseFormatSchema
 }).strict();
 

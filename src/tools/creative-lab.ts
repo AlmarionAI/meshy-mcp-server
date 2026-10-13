@@ -51,48 +51,22 @@ export function registerCreativeLabTools(server: McpServer, client: MeshyClient)
     "meshy_creative_lab",
     {
       title: "Creative Lab — Make a Product (end-to-end)",
-      description: `Turn a source photo into a finished Creative Lab product 3D model.
+      description: `Turn a photo (file_path or image_url; no text prompt) into a finished Creative Lab product 3D model, end to end.
 
-Products and cost:
-  - "figure" (chibi collectible), "keychain", "fridge-magnet", "vinyl-figure" (vinyl-toy style),
-    "brick-figure" (brick-minifigure style), "fidget-pixel" (pixel-art board of interlocking pieces) → 36 credits (6 + 30)
-  - "lamp" (3D-printable lampshade with base plate) → 36 credits (30 + 6)
-  - "keycap" (Cherry MX 1u keycap) → 62 credits (12 + 50)
-  - "fidget-collapsible" (nested-ring collapsible fidget from the photo's outline) → 6 credits, single stage
+Products and cost — confirm before calling:
+  - figure (chibi), vinyl-figure, brick-figure, keychain, fridge-magnet, fidget-pixel (pixel-art board of interlocking pieces) → 36 credits (6 + 30)
+  - lamp (3D-printable lampshade with base plate) → 36 (30 + 6)
+  - keycap (Cherry MX 1u) → 62 (12 + 50)
+  - fidget-collapsible (nested-ring fidget from the photo's outline) → 6, one stage
 
-Most products run two Meshy stages — concept prototype then 3D build — and this tool returns ONLY the final 3D model; the intermediate concept image is internal and never surfaced. One call does everything; it blocks while the stages run (typically 2–5 minutes) and reports progress.
+Most products run a concept prototype, then a 3D build. One call runs both, blocks while they run (typically 2–5 minutes, with progress) and returns only the final model; the concept image is internal and never shown. If the prototype does not succeed, the build is NOT started: a FAILED stage is refunded; one still running when the wait ends keeps running and is charged.
 
-IMPORTANT: confirm the credit cost with the user before calling — keycap costs 62, fidget-collapsible 6.
-
-INPUT — provide ONE image source (every product is image-only):
-  - Local image → file_path: "/absolute/path/photo.jpg" (.jpg/.jpeg/.png/.webp)
-  - Remote image → image_url: "https://example.com/photo.jpg" (or data URI)
-
-Args:
-  - product (enum, REQUIRED): "figure" | "lamp" | "keychain" | "fridge-magnet" | "vinyl-figure" | "brick-figure" | "keycap" | "fidget-pixel" | "fidget-collapsible"
-  - image_url / file_path (string): image source
-  - image_subject (enum, optional): lamp only — "character" | "landscape"
-  - pixel_subject (enum): fidget-pixel only, REQUIRED — "person" (chibi sprite) | "other" (bead-art icon)
-  - name_text (string, optional): keychain only — text to engrave, ≤10 characters
-  - head_size_mm (10–40, default 23), vertical_offset_mm (-5–5), base_model: keycap only
-  - build_options (object, optional): build settings for keychain / fridge-magnet (badge_shape, size_mm, relief…), lamp (diameter_mm, thickness_mm, light_source_preset…) and fidget-pixel (shape, grid_size 16|32, piece_size_mm, color_count, piece_height_mm). See the parameter description for every key.
-  - output_format (enum, optional): keychain / fridge-magnet "glb" | "obj" | "zip"; lamp "stl" | "zip"; fidget-pixel "3mf"
-  - name (string, optional): display name (≤100 chars); not engraved
-  - timeout_seconds (number): max wait per stage (default 300, max 600)
-  - response_format (enum): "markdown" or "json" (default: "markdown")
-
-Outputs: figure-type products and keychain / fridge-magnet give GLB (or the chosen format); lamp gives lamp_stl (+ base_stl with a fixture preset); keycap a model; fidget-pixel a 3MF with one object per piece; fidget-collapsible STL + GLB. Download with meshy_download_model and the task_type this tool reports; omit format to save every part.
-
-To multicolor-print the result: a Creative Lab model can only be sent to meshy_process_multicolor as model_url — pass its GLB URL, or a data URI of the downloaded GLB.
+Outputs: GLB (or output_format) for figures, keychain and fridge-magnet; lamp_stl (+ base_stl with a fixture preset); keycap a model; fidget-pixel a 3MF with one object per piece; fidget-collapsible STL + GLB. Download with meshy_download_model and the task_type this tool reports; omit format to save every part.
+To multicolor-print it, pass its GLB URL (or a GLB data URI) to meshy_process_multicolor as model_url; its task id is not accepted there.
 
 Examples:
-  - { product: "figure", file_path: "/Users/me/portrait.jpg" }
   - { product: "keychain", file_path: "/Users/me/dog.jpg", name_text: "Biscuit", build_options: { badge_shape: "star" } }
-  - { product: "lamp", image_url: "https://example.com/owl.jpg", image_subject: "character", build_options: { diameter_mm: 180 } }
-  - { product: "fidget-pixel", file_path: "/Users/me/cat.jpg", pixel_subject: "other", build_options: { grid_size: 16 } }
-  - { product: "keycap", file_path: "/Users/me/cat.jpg", head_size_mm: 25 }
-
-If the prototype stage does not succeed, the build is NOT started. A FAILED stage is refunded; one that is still running when the wait ends keeps running and is charged.`,
+  - { product: "fidget-pixel", file_path: "/Users/me/cat.jpg", pixel_subject: "other", build_options: { grid_size: 16 } }`,
       inputSchema: CreativeLabInputSchema,
       annotations: {
         readOnlyHint: false,

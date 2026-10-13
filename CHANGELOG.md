@@ -81,6 +81,11 @@ Sync with the public Meshy API as of 2026-10-12. Tools: 24 → 28.
 
 ### Changed
 
+- Tool descriptions and server instructions are about a quarter shorter than in 0.6.2, with four
+  more tools: argument lists that repeated the schemas, generic return / error / next-step
+  blocks and repeated examples are gone, every create tool's polling step is stated once in the
+  instructions, and per-model costs live only in the instructions' cost tables. Deprecated
+  parameters are still accepted
 - `meshy_list_models` covers every model-producing task type instead of text-to-3d only
   (image-to-3d by default, one request; `task_types` widens it). Each model carries its
   `task_type` and downloadable formats. It no longer reads as a list of AI models, and the

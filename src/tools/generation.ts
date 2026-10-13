@@ -34,45 +34,14 @@ export function registerGenerationTools(server: McpServer, client: MeshyClient) 
     "meshy_text_to_3d",
     {
       title: "Generate 3D Model from Text",
-      description: `Generate a 3D model from a text description using Meshy AI.
+      description: `Generate an untextured 3D PREVIEW from a text prompt; texture it afterwards with meshy_text_to_3d_refine once the user approves. Typically 2–3 minutes.
 
 PREFER THE IMAGE ROUTE: for higher quality and more control, generate a design image first (meshy_text_to_image), let the user approve it, then meshy_image_to_3d with input_task_id = the image task (textured in one task). Use direct text-to-3d for a quick draft or when the user explicitly asks for it.
 
-This tool creates a new 3D generation task and returns a task_id that can be used to poll the status. The generation process is asynchronous and typically takes 2-3 minutes.
-
-Args:
-  - prompt (string): Text description of the 3D model (2-800 characters)
-  - ai_model: "latest" (default, = Meshy 7.1) / "meshy-7.1" / "meshy-6" (20 credits), "meshy-6-lite" (5 credits) for standard; "meshy-t2" (5 credits) for Smart Topology. "meshy-7" is deprecated. Ask the user which model and confirm the cost first
-  - model_type: "standard" (default), "smart-topology" (T2, triangle-only), or deprecated "lowpoly"
-  - geometry_resolution: "standard" (default), "2k" or "4k" Ultra pass (+5 credits) on Meshy 7.1/latest standard generation. Confirm the surcharge first
-  - ultra_mode: deprecated compatibility alias for geometry_resolution "2k"
-  - topology (enum, optional): Mesh topology - "quad" or "triangle"
-  - target_polycount (number, optional): Target polygon count (100–300,000)
-  - symmetry_mode (enum, optional): DEPRECATED — no longer affects output
-  - should_remesh (boolean, optional): Standard remeshing, default false for Meshy 6/7/7.1. Ignored on Smart Topology
-  - pose_mode (enum, optional): "a-pose" or "t-pose". IMPORTANT: Use "t-pose" when the user intends to rig or animate the model
-  - target_formats (string[], optional): Output formats. Default: all except 3mf. For 3D printing white model, pass ["obj"].
-  - auto_size (boolean, optional): AI auto-estimate real-world height. Default false.
-  - origin_at (enum, optional): "bottom" or "center". Default "bottom" when auto_size is true.
-  - response_format (enum): Output format - "markdown" or "json" (default: "markdown")
-
-Workflow: This creates an untextured PREVIEW. After completion, obtain permission for texturing via meshy_text_to_3d_refine. Omit refine ai_model to inherit the preview model; T2 is not a refine override.
-Smart Topology generates directly at target_polycount (100–15,000 faces, default 4,000) and ignores remesh/decimation controls. Standard targeting requires should_remesh true.
-
-For 3D printing: pass target_formats: ["obj"] to only generate OBJ format (faster).
-For rigging/animation: use pose_mode: "t-pose" for best results.
-
-Returns:
-  { "task_id": "abc-123-def", "status": "PENDING", "estimated_time": "2-3 minutes" }
-
-Next Steps:
-  Use meshy_get_task_status with the task_id to wait for completion.
-
 Examples:
-  - "Create a low-poly dragon" → { prompt: "dragon", model_type: "smart-topology", ai_model: "meshy-t2", target_polycount: 4000 }
-  - "Max detail" → { prompt: "ornate knight helmet", ai_model: "meshy-7.1", geometry_resolution: "4k" }
-  - "Generate for 3D print" → { prompt: "cat", target_formats: ["obj"] }
-  - "Character for animation" → { prompt: "warrior", pose_mode: "t-pose" }`,
+  - Low-poly: { prompt: "dragon", model_type: "smart-topology", ai_model: "meshy-t2", target_polycount: 4000 }
+  - Max detail: { prompt: "ornate knight helmet", ai_model: "meshy-7.1", geometry_resolution: "4k" }
+  - 3D print: { prompt: "cat", target_formats: ["obj"] }`,
       inputSchema: TextTo3DInputSchema,
       outputSchema: TaskCreatedOutputSchema,
       annotations: {
@@ -158,42 +127,14 @@ Examples:
     "meshy_image_to_3d",
     {
       title: "Generate 3D Model from Image",
-      description: `Generate a 3D model from a single image using Meshy AI.
+      description: `Generate a 3D model from one image, textured by default (no refine step; should_texture false for a bare mesh). Typically 2–3 minutes.
 
-This tool creates a new 3D generation task from an image and returns a task_id.
+IMAGE INPUT (exactly ONE):
+  - file_path: a local image (RECOMMENDED; never base64-encode it yourself)
+  - image_url: a public URL
+  - input_task_id: a SUCCEEDED meshy_text_to_image / meshy_image_to_image task with ONE image (multi-view output → meshy_multi_image_to_3d)
 
-IMAGE INPUT (provide exactly ONE):
-  - Local file → file_path: "/absolute/path/to/image.jpg" (RECOMMENDED)
-  - Remote URL → image_url: "https://example.com/image.jpg"
-  - Image you generated → input_task_id: a SUCCEEDED meshy_text_to_image / meshy_image_to_image task with ONE image (multi-view output → meshy_multi_image_to_3d)
-  - NEVER manually base64-encode.
-
-Other Args:
-  - ai_model: "latest" (default, = Meshy 7.1) / "meshy-7.1" / "meshy-6" (20 mesh, 30 textured), "meshy-6-lite" (5 / 15, 2K textures only) for standard; "meshy-t2" (5 / 15) for Smart Topology. "meshy-7" is deprecated. Ask the user which model and confirm the cost first
-  - geometry_resolution: "standard" (default), "2k" or "4k" Ultra pass (+5 credits) on Meshy 7.1/latest standard generation. Confirm the surcharge first
-  - ultra_mode: deprecated compatibility alias for the 2k pass. Legacy explicit Meshy 7 single-image Ultra is retained
-  - model_type: "standard" (default), "smart-topology", or "lowpoly" (deprecated)
-  - pose_mode, topology, target_polycount, should_remesh (symmetry_mode is deprecated and has no effect)
-  - should_texture: Whether to generate textures (default true). Set false for untextured mesh
-  - enable_pbr: PBR maps (default false). Set true for metallic/roughness/normal maps
-  - texture_prompt, texture_image_url: Guide texturing
-  - texture_resolution: "2k" (default) / "4k" / "8k". 8K adds 5 credits — confirm first. Not on meshy-6-lite.
-    Replaces the deprecated hd_texture flag
-  - image_enhancement: Supported on meshy-6, meshy-7.1, and latest; false preserves deliberate input styling
-  - remove_lighting: Meshy 6 only; omitted values are not inserted into requests
-  - save_pre_remeshed_model, response_format
-
-Note: Image-to-3D has no separate refine step. Texturing is controlled by should_texture (default true).
-T2 targets 100–15,000 faces directly (default 4,000). Smart Topology ignores topology/remesh/pre-remesh/decimation controls; these are not forwarded. Standard targeting requires should_remesh true.
-
-Examples:
-  - Local file: { file_path: "/path/to/cat.jpg" }
-  - Public URL: { image_url: "https://example.com/cat.jpg" }
-  - With pose: { file_path: "/path/to/character.png", pose_mode: "a-pose" }
-
-Error Handling:
-  - Returns "InvalidImageUrl" if image is not accessible
-  - Returns "File not found" if file_path doesn't exist`,
+Example: { file_path: "/path/to/character.png", pose_mode: "t-pose" }`,
       inputSchema: ImageTo3DInputSchema,
       outputSchema: TaskCreatedOutputSchema,
       annotations: {
@@ -322,35 +263,9 @@ Error Handling:
     "meshy_text_to_3d_refine",
     {
       title: "Refine Text-to-3D Preview",
-      description: `Apply textures to a completed text-to-3D preview mesh using Meshy AI.
+      description: `Texture a SUCCEEDED meshy_text_to_3d preview. Get the user's approval first; omit ai_model to inherit the preview's model.
 
-This tool takes a completed preview task and generates a fully textured model. Run meshy_text_to_3d first to get a preview, then use this tool to add high-quality textures.
-
-Args:
-  - preview_task_id (string): Task ID of the completed preview task to refine (required)
-  - enable_pbr (boolean): Enable physically-based rendering textures (default: false)
-  - texture_prompt (string, optional): Text to guide texturing. Max 800 characters
-  - texture_image_url (string, optional): Image URL to guide texturing
-  - texture_resolution: "2k" (default) / "4k" / "8k". 10 credits, 15 at 8K. Not on meshy-6-lite
-  - ai_model: Optional override: "meshy-7.1", "latest" (= Meshy 7.1), "meshy-6", "meshy-6-lite". Omit to inherit the preview model. T2 is not a refine override
-  - remove_lighting: Meshy 6 only. With an inherited model it is passed through, so omit it when the preview used meshy-6-lite (the API rejects it there)
-  - target_formats (string[], optional): Output formats. Default: all except 3mf.
-  - auto_size (boolean, optional): AI auto-estimate real-world height. Default false.
-  - origin_at (enum, optional): "bottom" or "center".
-  - response_format (enum): Output format - "markdown" or "json" (default: "markdown")
-
-IMPORTANT: Omitted ai_model inherits the preview model rather than forcing latest. Obtain texturing approval before submitting; confirm current costs and preview compatibility for an explicit override.
-
-Returns:
-  { "task_id": "abc-123-def", "status": "PENDING", "estimated_time": "2-3 minutes" }
-
-Next Steps:
-  Use meshy_get_task_status with task_id and task_type="text-to-3d" to check progress.
-
-Examples:
-  - Basic refine: { preview_task_id: "abc-123" }
-  - With PBR: { preview_task_id: "abc-123", enable_pbr: true }
-  - Guided texture: { preview_task_id: "abc-123", texture_prompt: "rusty metal" }`,
+Example: { preview_task_id: "abc-123", texture_prompt: "rusty metal", enable_pbr: true }`,
       inputSchema: TextTo3DRefineInputSchema,
       outputSchema: TaskCreatedOutputSchema,
       annotations: {
@@ -431,41 +346,14 @@ Examples:
     "meshy_multi_image_to_3d",
     {
       title: "Generate 3D Model from Multiple Images",
-      description: `Generate a 3D model from 1–4 images using Meshy AI.
+      description: `Generate a 3D model from 1–4 views of the same object (better reconstruction), textured by default.
 
-Use multiple views of the same object for better 3D reconstruction.
+IMAGE INPUT (exactly ONE):
+  - file_paths: 1–4 local images (never base64-encode them yourself)
+  - image_urls: 1–4 public URLs
+  - input_task_id: a SUCCEEDED meshy_text_to_image / meshy_image_to_image task (multi-view included); its images are the input
 
-Image Input (provide ONE of these):
-  - image_urls (array): 1–4 publicly accessible image URLs
-  - file_paths (array): 1–4 absolute paths to LOCAL image files. Server reads and encodes them automatically.
-  - input_task_id: a SUCCEEDED meshy_text_to_image / meshy_image_to_image task (multi-view included); its 1–4 images are the input
-
-IMPORTANT: For local files, always use file_paths instead of manually base64-encoding.
-
-Other Args:
-  - ai_model: "latest" (default, = Meshy 7.1) / "meshy-7.1" / "meshy-6" (20 mesh, 30 textured), "meshy-6-lite" (5 / 15, 2K textures only). "meshy-7" is deprecated. Smart Topology is unavailable here. Ask the user which model and confirm the cost first
-  - geometry_resolution: "standard" (default) or "2k" Ultra pass (+5 credits) on Meshy 7.1/latest. No 4k here
-  - ultra_mode: deprecated compatibility alias for the 2k pass; confirm higher-detail cost
-  - pose_mode, topology, target_polycount, should_remesh (there is no model_type here; symmetry_mode is deprecated and has no effect)
-  - should_texture: Whether to generate textures (default true)
-  - enable_pbr: PBR maps (default false)
-  - texture_prompt, texture_image_url: Guide texturing
-  - texture_image_urls: 1–4 views of the same object to drive the texture (front view first). Meshy 7.1/latest only;
-    not combinable with texture_prompt / texture_image_url
-  - texture_resolution: "2k" (default) / "4k" / "8k". 8K adds 5 credits — confirm first. Not on meshy-6-lite.
-    Replaces the deprecated hd_texture flag
-  - image_enhancement: Supported on meshy-6, meshy-7.1, and latest; false preserves input styling
-  - remove_lighting: Supported on meshy-6, meshy-7.1, and latest
-  - save_pre_remeshed_model, response_format
-
-Examples:
-  - Local files: { file_paths: ["/path/front.jpg", "/path/side.jpg"] }
-  - Public URLs: { image_urls: ["https://example.com/front.jpg", "https://example.com/side.jpg"] }
-  - Multi-view texture: { image_urls: ["https://example.com/front.jpg"], texture_image_urls: ["https://example.com/front-color.jpg", "https://example.com/back-color.jpg"] }
-
-Error Handling:
-  - Returns "InvalidImageUrl" if any image is not accessible
-  - Returns "File not found" if any file_path doesn't exist`,
+Example: { file_paths: ["/path/front.jpg", "/path/side.jpg"] }`,
       inputSchema: MultiImageTo3DInputSchema,
       outputSchema: TaskCreatedOutputSchema,
       annotations: {

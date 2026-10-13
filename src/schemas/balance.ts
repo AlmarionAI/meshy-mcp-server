@@ -18,15 +18,15 @@ export const USAGE_ENDPOINTS = [
 
 export const ListUsageInputSchema = z.object({
   page_num: z.number().int().min(1).max(255).default(1)
-    .describe("Page number (default 1)"),
+    .describe("Page number"),
   page_size: z.number().int().min(1).max(100).default(20)
-    .describe("Records per page, 1–100 (default 20)"),
+    .describe("Records per page"),
   sort_by: z.enum(["-created_at", "+created_at"]).default("-created_at")
-    .describe("'-created_at' newest first (default) or '+created_at' oldest first"),
+    .describe("'-created_at' newest first (default) or '+created_at'"),
   start_time: z.string().optional()
-    .describe("Start of the created_at window, RFC 3339 (e.g. '2026-08-01T00:00:00Z'). Defaults to 30 days before end_time; the window may span at most 1 year."),
+    .describe("RFC 3339 start of the created_at window (default: 30 days before end_time; at most 1 year)."),
   end_time: z.string().optional()
-    .describe("End of the created_at window, RFC 3339. Defaults to now."),
+    .describe("RFC 3339 end of the window (default now)."),
   endpoints: z.array(z.enum(USAGE_ENDPOINTS)).min(1).optional()
     .describe("Only these endpoints ('text-to-3d' covers preview and refine). Omit for all."),
   status: z.enum(["SUCCEEDED", "FAILED"]).optional()

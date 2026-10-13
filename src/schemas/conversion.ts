@@ -15,12 +15,12 @@ import { ResponseFormatSchema, TaskIdSchema, UrlSchema } from "./common.js";
  */
 export const ConvertInputSchema = z.object({
   input_task_id: TaskIdSchema.optional()
-    .describe("ID of a SUCCEEDED Meshy task whose model to convert. Takes priority over model_url when both are given."),
+    .describe("A SUCCEEDED task with a model. Wins over model_url."),
   model_url: UrlSchema.optional()
-    .describe("Public URL of a 3D model (.glb / .gltf / .obj / .fbx / .stl), or a GLB data URI. Ignored when input_task_id is given."),
+    .describe("Public URL of a .glb / .gltf / .obj / .fbx / .stl model (max 100 MB), or a GLB data URI."),
   target_formats: z.array(z.nativeEnum(ConvertFormat))
     .min(1, "At least one target format is required")
-    .describe("Output formats (required). Options: glb, fbx, obj, usdz, blend, stl, 3mf."),
+    .describe("Formats to produce"),
   response_format: ResponseFormatSchema
 }).strict();
 
@@ -30,23 +30,23 @@ export const ConvertInputSchema = z.object({
  */
 export const ResizeInputSchema = z.object({
   input_task_id: TaskIdSchema.optional()
-    .describe("ID of a SUCCEEDED Meshy task whose model to resize (output is GLB). Takes priority over model_url when both are given."),
+    .describe("A SUCCEEDED task with a model (output GLB). Wins over model_url."),
   model_url: UrlSchema.optional()
-    .describe("Public URL of a 3D model (.glb / .gltf / .obj / .fbx / .stl), or a GLB data URI; output preserves the input format. Ignored when input_task_id is given."),
+    .describe("Public URL of a .glb / .gltf / .obj / .fbx / .stl model (output keeps its format), or a GLB data URI."),
   resize_height: z.number()
     .positive()
     .optional()
-    .describe("Resize to this exact height in meters. Mutually exclusive with resize_longest_side / auto_size."),
+    .describe("Height in meters"),
   resize_longest_side: z.number()
     .positive()
     .optional()
-    .describe("Resize so the longest side matches this value in meters (aspect ratio preserved). Mutually exclusive with resize_height / auto_size."),
+    .describe("Longest side in meters (aspect ratio kept)"),
   auto_size: z.boolean()
     .optional()
-    .describe("Use AI vision to estimate the real-world height and resize accordingly. Mutually exclusive with resize_height / resize_longest_side."),
+    .describe("AI-estimate the real-world height"),
   origin_at: z.nativeEnum(OriginAt)
     .optional()
-    .describe("Origin placement after resizing: 'bottom' (default) or 'center'."),
+    .describe("'bottom' (default) or 'center'"),
   response_format: ResponseFormatSchema
 }).strict();
 
@@ -56,9 +56,9 @@ export const ResizeInputSchema = z.object({
  */
 export const UvUnwrapInputSchema = z.object({
   input_task_id: TaskIdSchema.optional()
-    .describe("ID of a SUCCEEDED Meshy task that produced a GLB (≤40,000 faces). Takes priority over model_url when both are given."),
+    .describe("A SUCCEEDED task with a GLB. Wins over model_url."),
   model_url: UrlSchema.optional()
-    .describe("Public URL or data URI of a .glb model (≤40,000 faces). ONLY .glb is supported — convert other formats first. Ignored when input_task_id is given."),
+    .describe("Public URL or data URI of a .glb (convert other formats first)."),
   response_format: ResponseFormatSchema
 }).strict();
 
