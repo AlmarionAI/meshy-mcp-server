@@ -180,10 +180,10 @@ test("image prompts have no length cap", async () => {
   assert.equal(one.prompt, "x");
 });
 
-test("multi-image has no model_type", async () => {
+test("multi-image accepts the deprecated model_type but never sends it", async () => {
   const h = createHarness(registerGenerationTools);
-  const input = { image_urls: ["https://example.invalid/a.png"] };
-  assert.equal(h.schema("meshy_multi_image_to_3d").safeParse({ ...input, model_type: "lowpoly" }).success, false);
+  const input = { image_urls: ["https://example.invalid/a.png"], model_type: "lowpoly" };
+  assert.equal(h.schema("meshy_multi_image_to_3d").safeParse(input).success, true);
   const { body } = await h.call("meshy_multi_image_to_3d", input);
   assert.equal("model_type" in body, false);
 });

@@ -345,7 +345,9 @@ test("list_tasks queries the five generation and image types unless told otherwi
     "/openapi/v1/rigging": [{ id: "r", status: "SUCCEEDED", created_at: 2 }],
     "/openapi/v1/print/split": [{ id: "p", status: "FAILED", created_at: 1 }],
   });
-  await h.run("meshy_list_tasks", {});
+  const def = await h.run("meshy_list_tasks", {});
+  assert.match(def.content[0].text, /Default types only: printing, rigging/);
+  assert.match(def.structuredContent.note, /pass task_types/);
   assert.deepEqual(h.gets.map((g) => g.path).sort(), [
     "/openapi/v1/image-to-3d",
     "/openapi/v1/image-to-image",

@@ -8,7 +8,7 @@ export const MESHY_INSTRUCTIONS = `
 # Meshy AI — Workflow Guide
 
 Every create tool returns {task_id, status}, except meshy_creative_lab, which waits and returns the finished model. Wait for it with meshy_get_task_status (task_type is inferred when omitted), then meshy_download_model.
-Earlier results: meshy_list_models lists finished 3D models (image-to-3d by default; task_types widens it); meshy_list_tasks lists tasks of any status (generation and image types by default; task_types widens it).
+Earlier results: meshy_list_models lists finished 3D models (image-to-3d by default; task_types widens it); meshy_list_tasks lists tasks of any status (default: text-to-3d, image-to-3d, multi-image-to-3d, text-to-image, image-to-image; task_types widens it, so an empty default list does not mean there are no printing, rigging or Creative Lab tasks).
 
 ## Rule 1: Cost Confirmation
 Before calling ANY tool that costs credits, ask which ai_model to use where there is a choice (prefer an explicit one), present the cost and wait for user confirmation.

@@ -651,6 +651,9 @@ status and phase filter the fetched tasks, so a page can be shorter than limit; 
           page_count: allTasks.length,
           offset: params.offset,
           queried_types: taskTypesToQuery,
+          note: requested.length > 0
+            ? "Only the queried_types were searched."
+            : "Default types only: printing, rigging, animation, motion, post-processing and Creative Lab tasks are not included; pass task_types to list them.",
           tasks: allTasks,
           has_more: listed.hasMore,
           next_offset: listed.hasMore ? params.offset + allTasks.length : undefined,
@@ -662,6 +665,7 @@ status and phase filter the fetched tasks, so a page can be shorter than limit; 
           const lines = [`# Tasks`, ""];
           const typeLabel = `[${taskTypesToQuery.join(", ")}]`;
           lines.push(`**Showing**: ${totalCount} tasks ${typeLabel} (offset: ${output.offset})`);
+          lines.push(`*${output.note}*`);
           if (truncated) lines.push(`*(truncated from ${allTasks.length} results)*`);
           lines.push("");
 

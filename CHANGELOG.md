@@ -4,6 +4,20 @@
 
 Sync with the public Meshy API as of 2026-10-12. Tools: 24 → 28.
 
+### Behavior changes
+
+Calls that pass no type now return less than before. Check these when upgrading:
+
+- `meshy_list_tasks` without `task_type` / `task_types` lists only text-to-3d, image-to-3d,
+  multi-image-to-3d, text-to-image and image-to-image tasks (5 requests). It used to query
+  every task type. Pass `task_types` for printing, rigging, animation, motion, post-processing
+  or Creative Lab tasks; the response's `queried_types` and `note` say what was searched
+- `meshy_list_models` without `task_types` lists image-to-3d models. It used to list text-to-3d
+  models only; pass `task_types: ["text-to-3d"]` for that, or several types to combine them
+- `meshy_cancel_task` deletes a finished task only with `confirm_delete: true`
+- `meshy_download_model` on a Creative Lab task without `format` saves every part instead of
+  only the GLB
+
 ### Fixed
 
 - **No more duplicate creates.** Every request, task creates included, was retried up to 3 times
@@ -24,7 +38,8 @@ Sync with the public Meshy API as of 2026-10-12. Tools: 24 → 28.
 - Print, convert, resize and UV unwrap tools accept `input_task_id` together with `model_url`
   (`input_task_id` wins, as the API does) instead of rejecting the call
 - Image prompts are no longer capped at 600 characters; the image endpoints have no limit
-- `meshy_multi_image_to_3d` no longer offers or sends `model_type`, which the endpoint ignores
+- `meshy_multi_image_to_3d` no longer sends `model_type`, which the endpoint ignores; the argument is
+  still accepted (deprecated) so existing calls keep working
 - Error messages follow the HTTP status and keep the API's text: 402 points at
   `meshy_check_balance`, 409 explains that an in-progress task cannot be deleted yet. Failed
   tasks show `task_error.type` and `doc_url`, and the advice follows the type
@@ -92,7 +107,8 @@ Sync with the public Meshy API as of 2026-10-12. Tools: 24 → 28.
 - `meshy_list_models` covers every model-producing task type instead of text-to-3d only
   (image-to-3d by default, one request; `task_types` widens it). Each model carries its
   `task_type` and downloadable formats. It no longer reads as a list of AI models, and the
-  `filter` / `workspace_id` arguments, which the API never honored, are ignored
+  `filter` / `workspace_id` arguments, which the API never honored, are ignored. Its markdown output no longer
+  prints the long signed thumbnail URLs (still in the JSON output)
 - `meshy_cancel_task` follows the API's DELETE: a PENDING task is refunded, an IN_PROGRESS task
   cannot be deleted (Creative Lab: canceled without refund), and deleting a finished task, which
   removes its files, needs `confirm_delete: true`

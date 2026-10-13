@@ -225,6 +225,9 @@ export const MultiImageTo3DInputSchema = z.object({
   decimation_mode: decimationMode(),
   should_remesh: shouldRemesh(),
   symmetry_mode: deprecatedSymmetryMode(),
+  model_type: z.enum([ModelType.STANDARD, ModelType.LOWPOLY])
+    .optional()
+    .describe("Deprecated; ignored (this endpoint has no model_type)."),
   should_texture: shouldTexture(),
   texture_prompt: generationTexturePrompt(),
   texture_image_url: textureImageUrl(),

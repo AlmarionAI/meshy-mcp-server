@@ -61,6 +61,7 @@ export function registerWorkspaceTools(server: McpServer, client: MeshyClient) {
           page_count: models.length,
           offset: params.offset,
           queried_types: params.task_types,
+          note: `Only ${params.task_types.join(", ")} queried; models of other types need task_types.`,
           models,
           has_more: listed.hasMore,
           next_offset: listed.hasMore ? params.offset + models.length : undefined,
@@ -70,6 +71,7 @@ export function registerWorkspaceTools(server: McpServer, client: MeshyClient) {
         const renderModelsMarkdown = (modelList: ModelSummary[], truncated = false) => {
           const lines = [`# 3D Models`, ""];
           lines.push(`**Showing**: ${modelList.length} models [${params.task_types.join(", ")}] (offset: ${output.offset})`);
+          lines.push(`*${output.note}*`);
           if (truncated) lines.push(`*(truncated from ${models.length} results)*`);
           lines.push("");
 
@@ -80,7 +82,6 @@ export function registerWorkspaceTools(server: McpServer, client: MeshyClient) {
             if (model.vertex_count && model.face_count) {
               lines.push(`- **Geometry**: ${model.vertex_count.toLocaleString()} vertices, ${model.face_count.toLocaleString()} faces`);
             }
-            if (model.thumbnail_url) lines.push(`- **Thumbnail**: ${model.thumbnail_url}`);
             lines.push("");
           }
 
