@@ -15,7 +15,7 @@ Before calling ANY tool that costs credits, ask which ai_model to use where ther
 
 | Tool | Credits |
 |------|---------|
-| meshy_text_to_3d (preview, mesh only) | 20 (meshy-7.1 / latest / meshy-6), 5 (meshy-6-lite, meshy-t2) |
+| meshy_text_to_3d (preview, mesh only) | 20 (meshy-7.1 / latest / meshy-6), 5 (meshy-6-lite, meshy-t2, meshy-t2.5) |
 | meshy_image_to_3d / meshy_multi_image_to_3d | table below |
 | meshy_text_to_3d_refine / meshy_retexture | 10 (15 with texture_resolution "8k") |
 | meshy_remesh / meshy_rig (incl. walking + running) / meshy_uv_unwrap | 5 |
@@ -31,7 +31,7 @@ Before calling ANY tool that costs credits, ask which ai_model to use where ther
 |---|---|---|---|
 | meshy-7.1 / latest / meshy-6 (and deprecated meshy-7) | 20 | 30 | 35 |
 | meshy-6-lite | 5 | 15 | — (2K only) |
-| meshy-t2 (single-image Smart Topology) | 5 | 15 | 20 |
+| meshy-t2 / meshy-t2.5 (single-image Smart Topology) | 5 | 15 | 20 |
 
 Ultra geometry (geometry_resolution "2k"/"4k") adds 5 on meshy-7.1 / latest. Confirm the 8K and Ultra surcharges explicitly.
 Prices match https://docs.meshy.ai/en/api/pricing as of 2026-10-12; point the user there if a number looks off.
@@ -120,8 +120,8 @@ Suggested flow:
 ## Scenario K: Cleaner Topology / Part-Separated Geometry (cheaply)
 Trigger: user wants an editable, part-separated, or lower-poly model from an image or text.
 Suggested flow:
-1. Confirm the T2 cost, face target, and whether textures are wanted.
-2. Call meshy_image_to_3d or meshy_text_to_3d with model_type:"smart-topology", ai_model:"meshy-t2", and target_polycount. Set should_texture false on the image route when only geometry is approved.
+1. Confirm the model (meshy-t2, or meshy-t2.5: newest, sharper detail for game assets), cost, face target, and whether textures are wanted.
+2. Call meshy_image_to_3d or meshy_text_to_3d with model_type:"smart-topology", that ai_model, and target_polycount. Set should_texture false on the image route when only geometry is approved.
 3. Text preview is untextured; confirm refine separately, without a refine ai_model override.
 
 ## Scenario L: Print in Parts (Auto Split)

@@ -26,7 +26,7 @@
 - **Image to 3D**: Convert single or multiple images into 3D models
 - **Meshy 7.1 (v0.6.0)**: `ai_model: "meshy-7.1"` (and `latest`) on text-to-3d, image-to-3d and multi-image-to-3d. `geometry_resolution: "standard" | "2k" | "4k"` picks the geometry pass (+5 credits for 2k/4k; multi-image supports standard/2k). `ultra_mode` is deprecated
 - **Meshy 6 Lite (v0.6.0)**: `ai_model: "meshy-6-lite"` — fast, 5-credit mesh (15 textured, 2K textures only) on every generation endpoint
-- **Smart Topology**: `model_type: "smart-topology"` with `ai_model: "meshy-t2"` on text-to-3d (new in v0.6.0) and image-to-3d. Clean, part-separated triangle mesh generated directly at 100–15,000 faces (default 4,000) for 5 credits of mesh
+- **Smart Topology**: `model_type: "smart-topology"` with `ai_model: "meshy-t2"` on text-to-3d (new in v0.6.0) and image-to-3d. Clean, part-separated triangle mesh generated directly at 100–15,000 faces (default 4,000) for 5 credits of mesh. `meshy-t2.5` (v0.6.4) is the newest Smart Topology model, with sharper detail for game assets: 100–30,000 faces (default 15,000), same cost
 - **Multi-view texture on multi-image (v0.6.0)**: `texture_image_urls` — 1–4 views of the same object drive the texture (Meshy 7.1)
 - **8K Textures (v0.5.0)**: `texture_resolution: "2k" | "4k" | "8k"` on image-to-3d, multi-image-to-3d, text-to-3d refine and retexture (8K costs 15 credits vs 10). Replaces the now-deprecated `hd_texture` flag
 - **Multi-view Retexture (v0.5.0)**: `multiview_image_urls` — 1–4 ordered views of the *same object* drive the texture instead of a single style reference (requires Meshy 7)
@@ -52,8 +52,8 @@
 
 | Endpoint | Accepted `ai_model` | `latest` resolves to |
 |---|---|---|
-| `meshy_text_to_3d` / `_refine` | `meshy-7.1`, `meshy-6`, `meshy-6-lite`, `latest` — plus `meshy-t2` with `model_type: "smart-topology"` (preview only) | Meshy 7.1 |
-| `meshy_image_to_3d` | `meshy-7.1`, `meshy-6`, `meshy-6-lite`, `latest` — plus `meshy-t2` with `model_type: "smart-topology"` | Meshy 7.1 |
+| `meshy_text_to_3d` / `_refine` | `meshy-7.1`, `meshy-6`, `meshy-6-lite`, `latest` — plus `meshy-t2` / `meshy-t2.5` with `model_type: "smart-topology"` (preview only) | Meshy 7.1 |
+| `meshy_image_to_3d` | `meshy-7.1`, `meshy-6`, `meshy-6-lite`, `latest` — plus `meshy-t2` / `meshy-t2.5` with `model_type: "smart-topology"` | Meshy 7.1 |
 | `meshy_multi_image_to_3d` | `meshy-7.1`, `meshy-6`, `meshy-6-lite`, `latest` (no Smart Topology) | Meshy 7.1 |
 | `meshy_retexture` | `meshy-7`, `meshy-6`, `meshy-6-lite`, `latest` (no `meshy-7.1`) | Meshy 7 |
 
@@ -66,11 +66,11 @@ Generation cost ([pricing](https://docs.meshy.ai/en/api/pricing)):
 | `meshy-7.1` / `latest` | 20 | 30 | 35 |
 | `meshy-6` | 20 | 30 | 35 |
 | `meshy-6-lite` | 5 | 15 | — (2K only) |
-| `meshy-t2` (smart-topology, single-image) | 5 | 15 | 20 |
+| `meshy-t2` / `meshy-t2.5` (smart-topology, single-image) | 5 | 15 | 20 |
 
 Text-to-3D preview is billed mesh-only; refine adds 10 (15 at 8K). `geometry_resolution: "2k"` or `"4k"` (Ultra pass, Meshy 7.1 / `latest`) adds **+5**; multi-image supports `"2k"` only. `ultra_mode` is deprecated and maps to `"2k"`. `model_type: "lowpoly"` retires on 2026-10-30: use `smart-topology` + `meshy-t2`.
 
-Smart Topology (`meshy-t2`) generates directly at `target_polycount` (100–15,000 faces, default 4,000) and skips remeshing. For standard models, `target_polycount` needs `should_remesh: true` and is overridden by `decimation_mode`.
+Smart Topology generates directly at `target_polycount` and skips remeshing: `meshy-t2` 100–15,000 faces (default 4,000), `meshy-t2.5` 100–30,000 (default 15,000). Without `ai_model`, `model_type: "smart-topology"` uses `meshy-t2`. Output is triangle-only. For standard models, `target_polycount` needs `should_remesh: true` and is overridden by `decimation_mode`.
 
 Retexture is 10 credits (15 at 8K). Creative Lab is **36** credits per product (6 + 30; lamp is 30 + 6) except **keycap, 62** (12 + 50) and **fidget-collapsible, 6** (single stage). Images: nano-banana 3, nano-banana-2 6, nano-banana-2-lite 3, nano-banana-2-1 4, nano-banana-pro 9, GPT Image models 9 (text) / 12 (image). Other tools: remesh 5, rig 5, animate 3 per action, text-to-motion 10 (prime) / 3 (swift), convert 1, resize 1, uv-unwrap 5, analyze-printability free, repair-printability 10, multicolor 10, auto-split 10.
 

@@ -15,27 +15,27 @@ interface GenerationOptions {
 }
 
 export function resolveGenerationOptions(options: GenerationOptions, endpoint: GenerationEndpoint) {
-  const isSmartModel = options.ai_model === SmartTopologyModel.MESHY_T1 ||
-    options.ai_model === SmartTopologyModel.MESHY_T2;
+  const isSmartModel = isSmartTopologyModel(options.ai_model);
   const modelType = options.model_type ?? (isSmartModel ? ModelType.SMART_TOPOLOGY : ModelType.STANDARD);
   const model = options.ai_model ?? (modelType === ModelType.SMART_TOPOLOGY
     ? SmartTopologyModel.MESHY_T2 : AIModel.LATEST);
   const smartTopology = modelType === ModelType.SMART_TOPOLOGY;
 
-  if (smartTopology && model !== SmartTopologyModel.MESHY_T1 && model !== SmartTopologyModel.MESHY_T2) {
-    throw new RequestValidationError("Smart Topology requires ai_model meshy-t2.");
+  if (smartTopology && !isSmartTopologyModel(model)) {
+    throw new RequestValidationError("Smart Topology requires ai_model meshy-t2 or meshy-t2.5.");
   }
   if (isSmartModel && !smartTopology) {
     throw new RequestValidationError("Smart Topology models require model_type smart-topology.");
   }
-  if (smartTopology && (endpoint === "multi-image" || (endpoint === "text" && model !== SmartTopologyModel.MESHY_T2))) {
-    throw new RequestValidationError("T2 Smart Topology is supported on text preview and single-image generation only.");
+  if (smartTopology && (endpoint === "multi-image" || (endpoint === "text" && model === SmartTopologyModel.MESHY_T1))) {
+    throw new RequestValidationError("meshy-t2 / meshy-t2.5 Smart Topology is supported on text preview and single-image generation only.");
   }
-  if (model === SmartTopologyModel.MESHY_T2 && options.target_polycount !== undefined && options.target_polycount > 15000) {
-    throw new RequestValidationError("T2 target_polycount must be between 100 and 15,000 faces.");
+  const maxFaces = SMART_TOPOLOGY_MAX_FACES[model];
+  if (maxFaces !== undefined && options.target_polycount !== undefined && options.target_polycount > maxFaces) {
+    throw new RequestValidationError(`${model} target_polycount must be between 100 and ${maxFaces.toLocaleString("en-US")} faces.`);
   }
   if (smartTopology && endpoint === "text" && options.topology === "quad") {
-    throw new RequestValidationError("T2 text preview accepts triangle topology only.");
+    throw new RequestValidationError("Smart Topology text preview accepts triangle topology only.");
   }
   if (modelType === ModelType.LOWPOLY && isLiteModel(model)) {
     throw new RequestValidationError("meshy-6-lite does not support model_type lowpoly. Use model_type smart-topology with ai_model meshy-t2 instead.");
@@ -71,6 +71,15 @@ export function resolveGenerationOptions(options: GenerationOptions, endpoint: G
     ultra_mode: legacyUltra ? true : undefined
   };
 }
+
+const isSmartTopologyModel = (model?: string) =>
+  (Object.values(SmartTopologyModel) as string[]).includes(model ?? "");
+
+/** Smart Topology face ceilings; each model generates natively at target_polycount. */
+const SMART_TOPOLOGY_MAX_FACES: Record<string, number> = {
+  [SmartTopologyModel.MESHY_T2]: 15000,
+  [SmartTopologyModel.MESHY_T2_5]: 30000
+};
 
 const isMeshy71 = (model?: string) => model === AIModel.MESHY_7_1 || model === AIModel.LATEST;
 
