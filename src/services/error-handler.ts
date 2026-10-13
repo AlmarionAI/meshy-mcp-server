@@ -152,7 +152,7 @@ export function handleMeshyError(error: unknown, context?: ErrorContext): string
 function createNote(error: AxiosError): string {
   if (!createOutcomeUnknown(error)) return "";
   return " This create request was not retried automatically: it may still have created (and charged) the task. " +
-    "Check `meshy_list_tasks` for a new task before calling this tool again.";
+    "Check `meshy_list_tasks` (with this task's task_type) for a new task before calling this tool again.";
 }
 
 /**

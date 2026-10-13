@@ -339,3 +339,23 @@ test("task status carries type-specific results and fits its output schema", asy
     assert.equal(TaskStatusOutputSchema.strict().safeParse(out).success, true, JSON.stringify(out));
   }
 });
+
+test("list_tasks queries the five generation and image types unless told otherwise", async () => {
+  const h = createHarness(registerTaskTools, {
+    "/openapi/v1/rigging": [{ id: "r", status: "SUCCEEDED", created_at: 2 }],
+    "/openapi/v1/print/split": [{ id: "p", status: "FAILED", created_at: 1 }],
+  });
+  await h.run("meshy_list_tasks", {});
+  assert.deepEqual(h.gets.map((g) => g.path).sort(), [
+    "/openapi/v1/image-to-3d",
+    "/openapi/v1/image-to-image",
+    "/openapi/v1/multi-image-to-3d",
+    "/openapi/v1/text-to-image",
+    "/openapi/v2/text-to-3d",
+  ]);
+  h.gets.length = 0;
+  const both = await h.run("meshy_list_tasks", { task_type: "rig", task_types: ["print-split", "rigging"] });
+  assert.deepEqual(h.gets.map((g) => g.path).sort(), ["/openapi/v1/print/split", "/openapi/v1/rigging"]);
+  assert.deepEqual(both.structuredContent.tasks.map((t) => [t.id, t.task_type]), [["r", "rigging"], ["p", "print-split"]]);
+  assert.equal(h.schema("meshy_list_tasks").safeParse({ task_types: ["nope"] }).success, false);
+});

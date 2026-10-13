@@ -23,7 +23,7 @@ import {
   CHARACTER_LIMIT
 } from "../constants.js";
 import { Task, GetTaskResponse, TextureUrlsObject } from "../types.js";
-import { LIST_CAPABLE_TASK_TYPES } from "../utils/endpoints.js";
+import { DEFAULT_LIST_TASK_TYPES } from "../utils/endpoints.js";
 import { describeTaskError } from "../utils/response-formatter.js";
 import {
   resolveProjectDir,
@@ -612,9 +612,9 @@ ${stillRunning}`
     "meshy_list_tasks",
     {
       title: "List Generation Tasks",
-      description: `List tasks of one or every type, newest first by default. Without task_type it queries every type (one request per type) and pages through the merged list. Use it to find a task whose ID you lost; tasks created through the API do not appear in the Meshy web app. For finished 3D models only, meshy_list_models is cheaper.
+      description: `List tasks of any status, newest first by default, merged across the types queried (one request per type). Default: text-to-3d, image-to-3d, multi-image-to-3d, text-to-image and image-to-image; pass task_type / task_types for printing, rigging, animation, motion, post-processing or Creative Lab tasks. With a task_id in hand, use meshy_get_task_status instead. Tasks created through the API do not appear in the Meshy web app.
 
-status and phase filter the fetched tasks, so a page can be shorter than limit; continue with next_offset while has_more. Types whose request failed are listed in failed_types.`,
+status and phase filter the fetched tasks, so a page can be shorter than limit; continue with next_offset while has_more. Types whose request failed are listed in failed_types. For finished 3D models only, meshy_list_models is cheaper.`,
       inputSchema: ListTasksInputSchema,
       annotations: {
         readOnlyHint: true,
@@ -625,9 +625,8 @@ status and phase filter the fetched tasks, so a page can be shorter than limit; 
     },
     async (params: z.infer<typeof ListTasksInputSchema>) => {
       try {
-        const taskTypesToQuery: TaskType[] = params.task_type
-          ? [params.task_type]
-          : LIST_CAPABLE_TASK_TYPES;
+        const requested = [...new Set([...(params.task_type ? [params.task_type] : []), ...(params.task_types ?? [])])];
+        const taskTypesToQuery: TaskType[] = requested.length > 0 ? requested : DEFAULT_LIST_TASK_TYPES;
         // The list endpoints take only page_num / page_size / sort_by, so
         // status and phase are filtered here.
         const listed = await listAcrossTypes(client, taskTypesToQuery, {
@@ -661,7 +660,7 @@ status and phase filter the fetched tasks, so a page can be shorter than limit; 
         // Helper to render tasks as markdown
         const renderTasksMarkdown = (tasks: typeof output.tasks, totalCount: number, truncated = false) => {
           const lines = [`# Tasks`, ""];
-          const typeLabel = params.task_type ? `[${params.task_type}]` : "[all types]";
+          const typeLabel = `[${taskTypesToQuery.join(", ")}]`;
           lines.push(`**Showing**: ${totalCount} tasks ${typeLabel} (offset: ${output.offset})`);
           if (truncated) lines.push(`*(truncated from ${allTasks.length} results)*`);
           lines.push("");

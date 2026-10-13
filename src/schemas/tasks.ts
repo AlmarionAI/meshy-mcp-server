@@ -29,7 +29,12 @@ export const GetTaskStatusInputSchema = z.object({
  * List tasks input schema
  */
 export const ListTasksInputSchema = z.object({
-  task_type: TaskTypeFilterSchema,
+  task_type: TaskTypeFilterSchema.optional()
+    .describe("One task type to list (same names as meshy_get_task_status)."),
+  task_types: z.array(TaskTypeFilterSchema)
+    .min(1)
+    .optional()
+    .describe("Task types to list, merged with task_type. Default: text-to-3d, image-to-3d, multi-image-to-3d, text-to-image, image-to-image."),
   sort_by: z.enum(["+created_at", "-created_at"])
     .default("-created_at")
     .describe("'-created_at' newest first (default) or '+created_at'"),

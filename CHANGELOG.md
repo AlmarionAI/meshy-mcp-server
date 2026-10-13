@@ -52,7 +52,7 @@ Sync with the public Meshy API as of 2026-10-12. Tools: 24 → 28.
   (`printability`, `part_count`, `prompt_ignored`, thumbnails, rigging / animation / motion
   `result`), so clients that validate structured output accept them
 - `meshy_list_tasks` `task_type` takes the API's names (`rig`, `animate`, `print-multi-color`)
-  like the other task tools, and rejects unknown values. Without `task_type`, `offset` / `limit`
+  like the other task tools, and rejects unknown values. Across several types, `offset` / `limit`
   page through the merged list (it used to return `limit` tasks per type with no next page), and
   types whose list request fails are reported in `failed_types`
 
@@ -99,7 +99,10 @@ Sync with the public Meshy API as of 2026-10-12. Tools: 24 → 28.
 - `meshy_remesh` sends only the fields you set (no more `resize_height: 0` and
   `convert_format_only: false` on every call). Its resize, origin and `convert_format_only`
   fields are deprecated in favor of `meshy_resize` / `meshy_convert`; it adds `alpha_thumbnail`
-- `meshy_list_tasks` takes up to 100 results per page and covers every task type
+- `meshy_list_tasks` takes up to 100 results per page and can list every task type. Without a
+  type it queries text-to-3d, image-to-3d, multi-image-to-3d, text-to-image and image-to-image
+  (5 requests instead of one per type); `task_types` (merged with `task_type`) adds printing,
+  rigging, animation, motion, post-processing and Creative Lab tasks
 - API key link points to https://www.meshy.ai/developers/keys
 - Server instructions: new cost rows, a rule against re-creating a task after an unclear
   failure, Text to Motion and the animation library in the animation scenario, and an Auto Split

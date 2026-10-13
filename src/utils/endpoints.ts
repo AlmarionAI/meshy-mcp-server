@@ -89,6 +89,15 @@ export function toTaskType(value: unknown): TaskType | undefined {
  */
 export const LIST_CAPABLE_TASK_TYPES = Object.keys(TASK_ENDPOINTS) as TaskType[];
 
+/** What meshy_list_tasks queries when no type is given: generation and image tasks. */
+export const DEFAULT_LIST_TASK_TYPES: TaskType[] = [
+  TaskType.TEXT_TO_3D,
+  TaskType.IMAGE_TO_3D,
+  TaskType.MULTI_IMAGE_TO_3D,
+  TaskType.TEXT_TO_IMAGE,
+  TaskType.IMAGE_TO_IMAGE
+];
+
 /** Types whose own output is not a 3D model: images, motion clips, analyses, Creative Lab prototypes. */
 const NON_MODEL_TASK_TYPES = new Set<TaskType>([
   TaskType.TEXT_TO_IMAGE,

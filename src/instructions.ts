@@ -8,7 +8,7 @@ export const MESHY_INSTRUCTIONS = `
 # Meshy AI — Workflow Guide
 
 Every create tool returns {task_id, status}, except meshy_creative_lab, which waits and returns the finished model. Wait for it with meshy_get_task_status (task_type is inferred when omitted), then meshy_download_model.
-Earlier results: meshy_list_models lists finished 3D models (image-to-3d by default; task_types widens it); meshy_list_tasks lists every task, unfinished ones included.
+Earlier results: meshy_list_models lists finished 3D models (image-to-3d by default; task_types widens it); meshy_list_tasks lists tasks of any status (generation and image types by default; task_types widens it).
 
 ## Rule 1: Cost Confirmation
 Before calling ANY tool that costs credits, ask which ai_model to use where there is a choice (prefer an explicit one), present the cost and wait for user confirmation.
@@ -37,7 +37,7 @@ Ultra geometry (geometry_resolution "2k"/"4k") adds 5 on meshy-7.1 / latest. Con
 Prices match https://docs.meshy.ai/en/api/pricing as of 2026-10-12; point the user there if a number looks off.
 
 ## Rule 2: Never Re-create a Task You Are Unsure About
-If a create call fails with a timeout, network error or 5xx, the task may still have been created and charged. Check meshy_list_tasks for it before calling the create tool again. A wait that times out leaves the task running: poll the same task_id again.
+If a create call fails with a timeout, network error or 5xx, the task may still have been created and charged. Check meshy_list_tasks (task_type = that task's type) for it before calling the create tool again. A wait that times out leaves the task running: poll the same task_id again.
 
 ## Rule 3: Determine Output Format BEFORE Generating
 target_formats is fixed at creation time (3mf only when listed), so ask about the intended use first.

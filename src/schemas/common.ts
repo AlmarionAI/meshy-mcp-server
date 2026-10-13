@@ -64,9 +64,9 @@ export const TaskTypeSchema = z.preprocess(
 
 /**
  * Task type filter for listing: takes the same names, API spellings included,
- * but an unknown value is rejected instead of silently listing every type.
+ * but an unknown value is rejected instead of silently listing other types.
  */
 export const TaskTypeFilterSchema = z.preprocess(
   value => toTaskType(value) ?? value,
-  z.nativeEnum(TaskType).optional()
-).describe("Only this task type (same names as meshy_get_task_status). Omit to query every type and merge the results.");
+  z.nativeEnum(TaskType)
+);

@@ -28,7 +28,7 @@ export function registerWorkspaceTools(server: McpServer, client: MeshyClient) {
     "meshy_list_models",
     {
       title: "List Finished 3D Models",
-      description: `List your finished 3D models (not AI models), newest first, each with its task_id, task_type and formats ready for meshy_download_model. Queries only image-to-3d by default (one request); pass task_types to widen. meshy_list_tasks lists every task instead, unfinished ones, images and motion clips included.`,
+      description: `List your finished 3D models (not AI models), newest first, each with its task_id, task_type and formats ready for meshy_download_model. Queries only image-to-3d by default (one request); pass task_types to widen. meshy_list_tasks lists tasks of any status instead, images included.`,
       inputSchema: ListModelsInputSchema,
       annotations: {
         readOnlyHint: true,
