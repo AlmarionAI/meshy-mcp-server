@@ -34,6 +34,9 @@ Sync with the public Meshy API as of 2026-10-12. Tools: 24 → 28.
   a made-up 24 hours
 - `meshy_retexture` on `meshy-6-lite` with 4k/8k suggests `meshy-7`, which retexture takes,
   not `meshy-7.1`
+- `meshy_analyze_printability` no longer says "FDM" when another printer type is requested, and
+  mentions the thin-wall check when a printer type or print size is given
+- Task output no longer prints `Phase: undefined` for tasks that have no phase
 
 ### Added
 

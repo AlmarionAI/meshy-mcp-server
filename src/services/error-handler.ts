@@ -81,7 +81,8 @@ export function handleMeshyError(error: unknown, context?: ErrorContext): string
           const hint = tool === "meshy_list_usage"
             ? " The Usage API is available only to API keys on a Studio or Enterprise team."
             : "";
-          return `Error: Permission denied (403). ${errorData?.message || "Your API key may not have access to this resource."}${hint}`;
+          const detail = String(errorData?.message || "Your API key may not have access to this resource.").replace(/\.?$/, ".");
+          return `Error: Permission denied (403). ${detail}${hint}`;
         }
 
         case 404: {

@@ -287,7 +287,10 @@ Examples:
           },
           params.response_format as ResponseFormat,
           "Printability Analysis Task Created",
-          `Analyzing ${sourceDesc} for FDM printability. The result will report watertightness, volume, non-manifold edges, degenerate faces, and holes.`,
+          `Analyzing ${sourceDesc} for printability. The result will report watertightness, volume, non-manifold edges, degenerate faces, and holes` +
+            (params.printer_type || params.intended_print_height_mm || params.intended_print_longest_side_mm
+              ? `, plus thin walls for ${params.printer_type ?? "fdm"} at the given print size.`
+              : "."),
           "print-analyze"
         );
       } catch (error) {

@@ -169,7 +169,7 @@ function formatTask(task: Task, format: ResponseFormat): string {
     lines.push("");
 
     if (task.type) lines.push(`**Type**: ${task.type}`);
-    lines.push(`**Phase**: ${task.phase}`);
+    if (task.phase) lines.push(`**Phase**: ${task.phase}`);
     lines.push(`**Created**: ${new Date(task.created_at).toLocaleString()}`);
     if (task.updated_at) lines.push(`**Updated**: ${new Date(task.updated_at).toLocaleString()}`);
     lines.push("");
@@ -776,7 +776,7 @@ Error Handling:
             const typeTag = taskTypesToQuery.length > 1 ? ` [${task.task_type}]` : "";
             lines.push(`## ${task.name}${typeTag} (${task.id})`);
             lines.push(`- **Status**: ${task.status} ${task.status === TaskStatus.IN_PROGRESS ? `(${task.progress}%)` : ''}`);
-            lines.push(`- **Phase**: ${task.phase}`);
+            if (task.phase) lines.push(`- **Phase**: ${task.phase}`);
             lines.push(`- **Created**: ${new Date(task.created_at).toLocaleString()}`);
             if (task.vertex_count) {
               lines.push(`- **Geometry**: ${task.vertex_count.toLocaleString()} vertices, ${task.face_count?.toLocaleString()} faces`);
