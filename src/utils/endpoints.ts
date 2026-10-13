@@ -89,6 +89,19 @@ export function toTaskType(value: unknown): TaskType | undefined {
  */
 export const LIST_CAPABLE_TASK_TYPES = Object.keys(TASK_ENDPOINTS) as TaskType[];
 
+/** Types whose own output is not a 3D model: images, motion clips, analyses, Creative Lab prototypes. */
+const NON_MODEL_TASK_TYPES = new Set<TaskType>([
+  TaskType.TEXT_TO_IMAGE,
+  TaskType.IMAGE_TO_IMAGE,
+  TaskType.TEXT_TO_MOTION,
+  TaskType.PRINT_ANALYZE
+]);
+
+/** Task types that produce a downloadable 3D model. */
+export const MODEL_TASK_TYPES = LIST_CAPABLE_TASK_TYPES.filter(
+  t => !NON_MODEL_TASK_TYPES.has(t) && !t.endsWith("-prototype")
+) as [TaskType, ...TaskType[]];
+
 /**
  * Map task type to its API endpoint base path
  */

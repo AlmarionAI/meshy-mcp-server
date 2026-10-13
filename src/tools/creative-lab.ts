@@ -81,7 +81,7 @@ Args:
   - timeout_seconds (number): max wait per stage (default 300, max 600)
   - response_format (enum): "markdown" or "json" (default: "markdown")
 
-Outputs: figure-type products and keychain / fridge-magnet give GLB (or the chosen format); lamp gives lamp_stl (+ base_stl with a fixture preset); keycap a model; fidget-pixel a 3MF with one object per piece; fidget-collapsible STL + GLB. Download with meshy_download_model and the task_type this tool reports — every part is saved.
+Outputs: figure-type products and keychain / fridge-magnet give GLB (or the chosen format); lamp gives lamp_stl (+ base_stl with a fixture preset); keycap a model; fidget-pixel a 3MF with one object per piece; fidget-collapsible STL + GLB. Download with meshy_download_model and the task_type this tool reports; omit format to save every part.
 
 To multicolor-print the result: a Creative Lab model can only be sent to meshy_process_multicolor as model_url — pass its GLB URL, or a data URI of the downloaded GLB.
 
@@ -92,7 +92,7 @@ Examples:
   - { product: "fidget-pixel", file_path: "/Users/me/cat.jpg", pixel_subject: "other", build_options: { grid_size: 16 } }
   - { product: "keycap", file_path: "/Users/me/cat.jpg", head_size_mm: 25 }
 
-If the prototype stage fails, the build is NOT started (only the prototype is charged).`,
+If the prototype stage does not succeed, the build is NOT started. A FAILED stage is refunded; one that is still running when the wait ends keeps running and is charged.`,
       inputSchema: CreativeLabInputSchema,
       annotations: {
         readOnlyHint: false,
@@ -169,7 +169,7 @@ If the prototype stage fails, the build is NOT started (only the prototype is ch
               isError: true,
               content: [{
                 type: "text",
-                text: `Error: Creative Lab ${product} prototype ${stageFailure(proto, params.timeout_seconds)}. The build stage was NOT started (the prototype costs ${credits.prototype} credits). Prototype task_id: ${protoId} (task_type "${protoType}").`
+                text: `Error: Creative Lab ${product} prototype ${stageFailure(proto, params.timeout_seconds)}. The build stage was NOT started${proto?.status === TaskStatus.FAILED ? "" : ` (the prototype is charged ${credits.prototype} credits)`}. Prototype task_id: ${protoId} (task_type "${protoType}").`
               }]
             };
           }
@@ -243,7 +243,7 @@ If the prototype stage fails, the build is NOT started (only the prototype is ch
 **Outputs**: ${formats.join(", ") || "none"}
 **Credits Consumed**: ${totalCredits}${singleStage ? "" : " (prototype + build)"}
 
-The final 3D ${product} is ready. Download it with \`meshy_download_model\` (task_id "${buildId}", task_type "${buildType}"); every part is saved.`;
+The final 3D ${product} is ready. Download it with \`meshy_download_model\` (task_id "${buildId}", task_type "${buildType}", no format) to save every part.`;
         }
 
         return {

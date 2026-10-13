@@ -4,7 +4,8 @@
 
 import { z } from "zod";
 import { TaskStatus, TaskPhase, TaskType, POLL_MAX_TIMEOUT } from "../constants.js";
-import { ResponseFormatSchema, PaginationSchema, TaskIdSchema, TaskTypeSchema } from "./common.js";
+import { MODEL_TASK_TYPES, toTaskType } from "../utils/endpoints.js";
+import { ResponseFormatSchema, PaginationSchema, TaskIdSchema, TaskTypeSchema, TaskTypeFilterSchema } from "./common.js";
 
 /**
  * Get task status input schema (also supports wait mode)
@@ -28,9 +29,7 @@ export const GetTaskStatusInputSchema = z.object({
  * List tasks input schema
  */
 export const ListTasksInputSchema = z.object({
-  task_type: z.nativeEnum(TaskType)
-    .optional()
-    .describe("Filter by task type. If omitted, queries every task type and merges results."),
+  task_type: TaskTypeFilterSchema,
   sort_by: z.enum(["+created_at", "-created_at"])
     .default("-created_at")
     .describe("Sort order by creation time. '-created_at' = newest first (default), '+created_at' = oldest first"),
@@ -61,8 +60,8 @@ export const DownloadModelInputSchema = z.object({
   task_id: TaskIdSchema,
   task_type: TaskTypeSchema,
   format: z.enum(["glb", "fbx", "usdz", "stl", "obj", "blend", "3mf"])
-    .default("glb")
-    .describe("Model format to download. IMPORTANT: Ask the user which format they need before downloading. Recommendations: GLB (general viewing), OBJ (white model printing), 3MF (multicolor printing), FBX (game engines/animation), USDZ (AR/Apple), BLEND (Blender). Do NOT download all formats. NOTE: a format is only downloadable if it was generated — '3mf' must be requested at creation via target_formats:[\"3mf\"], or produced by the multi-color print / convert tools."),
+    .optional()
+    .describe("Model format to download (default glb). IMPORTANT: Ask the user which format they need before downloading. Recommendations: GLB (general viewing), OBJ (white model printing), 3MF (multicolor printing), FBX (game engines/animation), USDZ (AR/Apple), BLEND (Blender). Do NOT download all formats. NOTE: a format is only downloadable if it was generated — '3mf' must be requested at creation via target_formats:[\"3mf\"], or produced by the multi-color print / convert tools. Creative Lab tasks: omit it to save every part (e.g. lamp + base STLs). Ignored for image and text-to-motion tasks, which save their own files."),
   include_textures: z.boolean()
     .default(true)
     .describe("Include texture files in response"),
@@ -74,7 +73,7 @@ export const DownloadModelInputSchema = z.object({
     .describe("Parent task ID for chaining (e.g., preview_task_id for refine, input_task_id for rig). Places output in the same project folder as the parent."),
   print_ready: z.boolean()
     .optional()
-    .describe("If true and format is OBJ, auto-fix coordinates for 3D printing: rotates Y-up to Z-up, scales to target height, centers on XY, aligns bottom to Z=0. Default false."),
+    .describe("If true and format is OBJ, auto-fix coordinates for 3D printing: rotates Y-up to Z-up, scales to target height, centers on XY, aligns bottom to Z=0. Default false. Changes only the local file (free); meshy_resize (1 credit) rescales the model on Meshy."),
   print_height_mm: z.number()
     .optional()
     .describe("Target height in mm when print_ready is true. Default 75. Adjust per user request (e.g. 'print at 15cm' → 150).")
@@ -84,11 +83,15 @@ export const DownloadModelInputSchema = z.object({
  * List models input schema
  */
 export const ListModelsInputSchema = z.object({
+  task_types: z.array(z.preprocess(value => toTaskType(value) ?? value, z.enum(MODEL_TASK_TYPES)))
+    .min(1)
+    .default([TaskType.IMAGE_TO_3D])
+    .describe("Model task types to list (default [\"image-to-3d\"], one request). Pass several, e.g. [\"text-to-3d\", \"image-to-3d\", \"multi-image-to-3d\"], to widen; each type is one more request."),
   workspace_id: z.string()
     .optional()
-    .describe("Workspace ID (uses default if omitted)"),
+    .describe("Ignored; accepted for compatibility."),
   filter: z.enum(["all", "published", "private"])
-    .default("all")
-    .describe("Filter models by visibility"),
+    .optional()
+    .describe("Ignored (the API reports no publish state); accepted for compatibility."),
   response_format: ResponseFormatSchema
 }).merge(PaginationSchema).strict();

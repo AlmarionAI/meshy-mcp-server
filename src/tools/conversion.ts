@@ -44,7 +44,7 @@ Provide input_task_id or model_url (input_task_id wins if both are given), plus 
 
 Args:
   - input_task_id (string, optional): SUCCEEDED Meshy task whose model to convert. Takes priority over model_url when both are given.
-  - model_url (string, optional): Public URL or data URI of a model (.glb / .gltf / .obj / .fbx / .stl). Ignored when input_task_id is given.
+  - model_url (string, optional): Public URL of a model (.glb / .gltf / .obj / .fbx / .stl), or a GLB data URI. Ignored when input_task_id is given.
   - target_formats (array, REQUIRED): Output formats. Options: glb, fbx, obj, usdz, blend, stl, 3mf.
   - response_format (enum): "markdown" or "json" (default: "markdown")
 
@@ -103,11 +103,13 @@ Examples:
       title: "Resize 3D Model to Real-World Dimensions",
       description: `Resize an existing 3D model to real-world dimensions. Cost: 1 credit.
 
+This rescales the model on Meshy, so later tasks (e.g. Auto Split) use the new size. To only scale a downloaded OBJ for a slicer, meshy_download_model with print_ready + print_height_mm does it locally for free.
+
 Provide input_task_id or model_url (input_task_id wins if both are given), AND exactly one resize mode.
 
 Args:
   - input_task_id (string, optional): SUCCEEDED Meshy task (output is GLB). Takes priority over model_url when both are given.
-  - model_url (string, optional): Public URL or data URI of a model (.glb / .gltf / .obj / .fbx / .stl); output preserves input format. Ignored when input_task_id is given.
+  - model_url (string, optional): Public URL of a model (.glb / .gltf / .obj / .fbx / .stl), or a GLB data URI; output preserves input format. Ignored when input_task_id is given.
   - resize_height (number, optional): Exact height in meters.
   - resize_longest_side (number, optional): Longest side in meters (aspect ratio preserved).
   - auto_size (boolean, optional): AI-estimate the real-world height and resize.

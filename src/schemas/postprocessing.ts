@@ -16,7 +16,7 @@ export const RemeshInputSchema = z.object({
     .describe("ID of a SUCCEEDED text-to-3d (preview or refine), image-to-3d or retexture task to remesh"),
   model_url: UrlSchema
     .optional()
-    .describe("Public URL or data URI of a model to remesh (.glb / .gltf / .obj / .fbx / .stl, max 100 MB)"),
+    .describe("Public URL of a model to remesh (.glb / .gltf / .obj / .fbx / .stl, max 100 MB), or a GLB data URI"),
   target_formats: z.array(z.enum(["glb", "fbx", "obj", "usdz", "blend", "stl", "3mf"]))
     .default(["glb"])
     .describe("Output formats to generate (default: ['glb']): glb, fbx, obj, usdz, blend, stl, 3mf. 3MF is only produced when listed."),

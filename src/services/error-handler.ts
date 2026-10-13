@@ -97,8 +97,9 @@ export function handleMeshyError(error: unknown, context?: ErrorContext): string
 
         case 409:
           // e.g. DELETE of a task that is already IN_PROGRESS.
-          return `Error: Conflict (409). ${errorData?.message || "The task's current state does not allow this operation."} ` +
-            "Check the task with `meshy_get_task_status` and retry once it is SUCCEEDED, FAILED or CANCELED.";
+          return `Error: Conflict (409). ${String(errorData?.message || "The task's current state does not allow this operation.").replace(/\.?$/, ".")} ` +
+            "A running task cannot be stopped and its credits are already spent. Once it finishes, delete it only " +
+            "if the user wants the result gone (permanent, no refund, needs confirm_delete: true).";
 
         case 429:
           if (isQueueFullError(error)) {
@@ -175,7 +176,7 @@ function appendContextSuggestions(message: string, error: unknown, context?: Err
 
   // Multi-color + missing texture
   if (tool === "meshy_process_multicolor" && (errorText.includes("texture") || errorText.includes("input") || errorText.includes("task"))) {
-    return message + `\n\n**Fix**: The input model must have textures. Run \`meshy_text_to_3d_refine\` or \`meshy_retexture\` first to add textures, then use the resulting task ID as input_task_id.`;
+    return message + `\n\n**Fix**: The input model must have textures: use a textured image-to-3d / multi-image-to-3d task, or texture the model first with \`meshy_text_to_3d_refine\` or \`meshy_retexture\`, then pass that task ID as input_task_id.`;
   }
 
   // Insufficient credits — extra hint for the 10-credit print operations

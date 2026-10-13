@@ -7,7 +7,7 @@ import axios from "axios";
 import * as fs from "fs";
 import * as path from "path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { MeshyClient, getTaskWithAutoInference, pollTask } from "../services/meshy-client.js";
+import { MeshyClient, getTaskWithAutoInference, pollTask, listAcrossTypes } from "../services/meshy-client.js";
 import { handleMeshyError } from "../services/error-handler.js";
 import {
   GetTaskStatusInputSchema,
@@ -23,7 +23,7 @@ import {
   CHARACTER_LIMIT
 } from "../constants.js";
 import { Task, GetTaskResponse, TextureUrlsObject } from "../types.js";
-import { getTaskEndpoint, LIST_CAPABLE_TASK_TYPES } from "../utils/endpoints.js";
+import { LIST_CAPABLE_TASK_TYPES } from "../utils/endpoints.js";
 import { describeTaskError } from "../utils/response-formatter.js";
 import {
   resolveProjectDir,
@@ -142,9 +142,10 @@ function expiresAt(task: Task): string | undefined {
   return finished > 0 ? new Date(finished + RETENTION_MS).toISOString() : undefined;
 }
 
-function expiryNote(task: Task): string {
+function expiryNote(task: Task, saved = true): string {
   const at = expiresAt(task);
-  return `**Note**: The Meshy download URLs stop working${at ? ` at ${at}` : ""} (results are kept for 3 days after the task finishes). Local files are permanent.`;
+  return `**Note**: The Meshy download URLs stop working${at ? ` at ${at}` : ""} (results are kept for 3 days after the task finishes).` +
+    (saved ? " Local files are permanent." : " Download the files before then.");
 }
 
 /**
@@ -299,7 +300,7 @@ function buildWaitSuccessResponse(
       lines.push("- **Running animation**: included FREE");
     }
     lines.push("");
-    lines.push("**NOTE**: Walking and running animations are included FREE with rigging. Do NOT call `meshy_animate` for these — only use it for CUSTOM animations (3 credits each).");
+    lines.push("**NOTE**: Walking and running are included FREE as separate files; `meshy_animate` (3 credits per action) is for other actions, or walk/run bundled into one multi-clip file.");
     lines.push("");
   }
 
@@ -351,11 +352,11 @@ function buildWaitSuccessResponse(
     }
     lines.push("");
     if (p.status === "error") {
-      lines.push(`**Recommendation**: \`meshy_repair_printability\` (10 credits) before printing — errors block reliable FDM output.`);
+      lines.push(`**Recommendation**: \`meshy_repair_printability\` (10 credits) before printing — errors block a reliable print.`);
     } else if (p.status === "warning") {
       lines.push(`**Recommendation**: repair is optional; warnings (degenerate faces / holes) won't block printing but may affect surface quality.`);
     } else if (p.status === "healthy") {
-      lines.push(`**Recommendation**: model is print-ready — proceed to slicer.`);
+      lines.push(`**Recommendation**: model is print-ready — download the analyzed source task's model (not this analyze task, which has no model) and open it in a slicer.`);
     }
     lines.push("");
   }
@@ -365,7 +366,8 @@ function buildWaitSuccessResponse(
   if (taskType !== TaskType.PRINT_ANALYZE) {
     lines.push("**Next Steps**: Use `meshy_download_model` with task_id \"" + taskId + "\"" +
       (taskType !== TaskType.TEXT_TO_3D ? ` and task_type "${taskType}"` : "") +
-      " to get download URLs.");
+      (taskType === TaskType.MULTI_COLOR_PRINT ? ' and format "3mf"' : "") +
+      " to get the files.");
   }
 
   const modelUrls: Record<string, string> = {};
@@ -622,14 +624,14 @@ ${stillRunning}`
       title: "List Generation Tasks",
       description: `List tasks across all task types with filtering and pagination.
 
-Queries one or all task types. When task_type is omitted, queries every task type's list endpoint in parallel and merges results sorted by creation time. Use it to find a task whose ID you no longer have — tasks created through the API do not appear in the Meshy web app.
+Queries one or all task types. When task_type is omitted, queries every task type's list endpoint in parallel (one request per type) and pages through the merged list, sorted by creation time. Use it to find a task whose ID you no longer have — tasks created through the API do not appear in the Meshy web app. For finished 3D models only, meshy_list_models is cheaper.
 
 Args:
   - task_type (enum, optional): One task type (any value meshy_get_task_status takes, e.g. "image-to-3d", "rigging", "animation", "print-split", "text-to-motion", "creative-lab-lamp-build"). If omitted, queries ALL types and merges results.
   - sort_by (enum): Sort by creation time - "-created_at" (newest first, default) or "+created_at" (oldest first)
   - status (enum, optional): Keep only tasks with this status - "PENDING", "IN_PROGRESS", "SUCCEEDED", "FAILED", "CANCELED". Applied to the fetched page, so a page can come back shorter than limit
   - phase (enum, optional): Keep only tasks in this phase. Applied to the fetched page, like status
-  - limit (number): Results per page per endpoint, 1-100 (default: 20). When querying all types, the merged list can be much longer.
+  - limit (number): Results per page, 1-100 (default: 20)
   - offset (number): Skip N results for pagination (default: 0)
   - response_format (enum): Output format - "markdown" or "json" (default: "markdown")
 
@@ -653,7 +655,7 @@ Examples:
 
 Error Handling:
   - Automatically truncates if response exceeds size limit
-  - Partial endpoint failures are tolerated (uses Promise.allSettled)`,
+  - Task types whose list request fails are reported in failed_types`,
       inputSchema: ListTasksInputSchema,
       annotations: {
         readOnlyHint: true,
@@ -664,104 +666,37 @@ Error Handling:
     },
     async (params: z.infer<typeof ListTasksInputSchema>) => {
       try {
-        const pageSize = params.limit; // API max is 100
-        const pageNum = Math.floor(params.offset / pageSize) + 1;
-        const baseQueryParams: Record<string, string | number> = {
-          page_size: pageSize,
-          page_num: pageNum,
-          sort_by: params.sort_by
-        };
-
-
-        // Determine which endpoints to query
         const taskTypesToQuery: TaskType[] = params.task_type
           ? [params.task_type]
           : LIST_CAPABLE_TASK_TYPES;
-
-        // Query endpoints (parallel for multi-type, single for specific type)
-        interface TaggedTask {
-          id: string;
-          name: string;
-          task_type: string;
-          status: string;
-          progress: number;
-          phase: string;
-          created_at: string | number;
-          vertex_count?: number;
-          face_count?: number;
-        }
-
-        let allTasks: TaggedTask[] = [];
-
-        if (taskTypesToQuery.length === 1) {
-          // Single endpoint query
-          const endpoint = getTaskEndpoint(taskTypesToQuery[0]);
-          const tasks = await client.get<Task[]>(endpoint, baseQueryParams);
-          const taskList = Array.isArray(tasks) ? tasks : [];
-          allTasks = taskList.map(task => ({
-            id: task.id,
-            name: task.name || task.prompt || "Untitled",
-            task_type: taskTypesToQuery[0],
-            status: task.status,
-            progress: task.progress,
-            phase: task.phase,
-            created_at: task.created_at,
-            vertex_count: task.vertex_count,
-            face_count: task.face_count
-          }));
-        } else {
-          // Parallel query across all list-capable endpoints
-          const results = await Promise.allSettled(
-            taskTypesToQuery.map(async (tt) => {
-              const endpoint = getTaskEndpoint(tt);
-              const tasks = await client.get<Task[]>(endpoint, baseQueryParams);
-              const taskList = Array.isArray(tasks) ? tasks : [];
-              return taskList.map(task => ({
-                id: task.id,
-                name: task.name || task.prompt || "Untitled",
-                task_type: tt as string,
-                status: task.status,
-                progress: task.progress,
-                phase: task.phase,
-                created_at: task.created_at,
-                vertex_count: task.vertex_count,
-                face_count: task.face_count
-              }));
-            })
-          );
-
-          for (const result of results) {
-            if (result.status === "fulfilled") {
-              allTasks.push(...result.value);
-            }
-            // Rejected results are skipped (partial failure tolerance)
-          }
-          const failed = results.find(r => r.status === "rejected");
-          if (failed && results.every(r => r.status === "rejected")) throw failed.reason;
-
-          // Sort merged results by created_at
-          allTasks.sort((a, b) => {
-            const timeA = new Date(a.created_at).getTime();
-            const timeB = new Date(b.created_at).getTime();
-            return params.sort_by === "+created_at" ? timeA - timeB : timeB - timeA;
-          });
-        }
-
         // The list endpoints take only page_num / page_size / sort_by, so
-        // status and phase filter the fetched page here.
-        const fetchedCount = allTasks.length;
-        allTasks = allTasks.filter(t =>
-          (!params.status || t.status === params.status) && (!params.phase || t.phase === params.phase));
+        // status and phase are filtered here.
+        const listed = await listAcrossTypes(client, taskTypesToQuery, {
+          sortBy: params.sort_by,
+          offset: params.offset,
+          limit: params.limit,
+          keep: task => (!params.status || task.status === params.status) && (!params.phase || task.phase === params.phase)
+        });
+        const allTasks = listed.items.map(({ task, taskType }) => ({
+          id: task.id,
+          name: task.name || task.prompt || "Untitled",
+          task_type: taskType as string,
+          status: task.status,
+          progress: task.progress,
+          phase: task.phase,
+          created_at: task.created_at,
+          vertex_count: task.vertex_count,
+          face_count: task.face_count
+        }));
 
         const output = {
           page_count: allTasks.length,
           offset: params.offset,
           queried_types: taskTypesToQuery,
           tasks: allTasks,
-          has_more: taskTypesToQuery.length === 1 ? fetchedCount >= pageSize : false,
-          next_offset: taskTypesToQuery.length === 1 && fetchedCount >= pageSize
-            ? params.offset + fetchedCount
-            : undefined
+          has_more: listed.hasMore,
+          next_offset: listed.hasMore ? params.offset + allTasks.length : undefined,
+          failed_types: listed.failed.length > 0 ? listed.failed : undefined
         };
 
         // Helper to render tasks as markdown
@@ -786,6 +721,9 @@ Error Handling:
 
           if (output.has_more) {
             lines.push(`**More results available**. Use offset=${output.next_offset} to see next page.`);
+          }
+          if (output.failed_types) {
+            lines.push(`**Not listed** (request failed): ${output.failed_types.join(", ")}`);
           }
           return lines.join("\n");
         };
@@ -837,7 +775,7 @@ Error Handling:
 Creative Lab tasks (task_type "creative-lab-..."):
   - PENDING → canceled, credits refunded
   - IN_PROGRESS → canceled, credits NOT refunded
-  - SUCCEEDED / FAILED / CANCELED → cannot be canceled
+  - SUCCEEDED / FAILED / CANCELED → cannot be canceled or deleted, even with confirm_delete
 
 Every other task:
   - PENDING → deleted, credits refunded
@@ -875,7 +813,7 @@ Examples:
         if (finished && creativeLab) {
           return {
             isError: true,
-            content: [{ type: "text", text: `Error: this Creative Lab task is already ${previousStatus} and cannot be canceled.` }]
+            content: [{ type: "text", text: `Error: this Creative Lab task is already ${previousStatus}; the API cannot cancel or delete a finished Creative Lab task.` }]
           };
         }
         if (finished && !params.confirm_delete) {
@@ -933,7 +871,7 @@ Examples:
       title: "Download Model or Image",
       description: `Download a completed task's output to local disk with automatic file organization.
 
-Handles both 3D models and 2D images: 3D tasks save the chosen model \`format\`; image tasks (text-to-image / image-to-image) save the generated PNG/JPG image(s) and ignore \`format\`.
+Handles both 3D models and 2D images: 3D tasks save the chosen model \`format\`; image tasks (text-to-image / image-to-image) save the generated PNG/JPG image(s) and text-to-motion saves its clip (FBX or BVH), both ignoring \`format\`. Creative Lab: omit \`format\` to save every part. Rigging and animation tasks are not saved: they return their file URLs.
 
 IMPORTANT: For 3D models, ask the user which format they need BEFORE downloading. Do NOT download all formats.
 Format recommendations: GLB (viewing), OBJ (white model printing), 3MF (multicolor printing), FBX (game engines), USDZ (AR).
@@ -943,7 +881,7 @@ By default, files are auto-saved to meshy_output/ under the current working dire
 Args:
   - task_id (string): Task ID of completed model (required)
   - task_type (enum, optional): Task type for endpoint routing. If omitted or wrong, the server finds the task by its own type.
-  - format (enum): Model format - "glb", "fbx", "usdz", "stl", "obj", "blend", or "3mf" (default: "glb"). IMPORTANT: Ask user which format they need before downloading. NOTE: "3mf" is downloadable only if it was generated — request it via target_formats:["3mf"] at creation, or use meshy_convert / meshy_process_multicolor.
+  - format (enum, optional): Model format - "glb", "fbx", "usdz", "stl", "obj", "blend", or "3mf" (default: "glb"). IMPORTANT: Ask user which format they need before downloading. NOTE: "3mf" is downloadable only if it was generated — request it via target_formats:["3mf"] at creation, or use meshy_convert / meshy_process_multicolor.
   - include_textures (boolean): Include texture files (default: true)
   - save_to (string, optional): Override auto path with a custom ABSOLUTE path. If omitted, auto-saves to meshy_output/{timestamp}_{prompt}_{id}/.
   - parent_task_id (string, optional): Parent task ID for chaining (e.g., preview_task_id for refine). Places output in the same project folder.
@@ -1062,7 +1000,7 @@ ${expiryNote(task)}`;
           };
         }
 
-        let fmt = params.format;
+        const fmt = params.format ?? "glb";
 
         // Text-to-motion: one clip in result.motion_url (FBX for prime, BVH for swift).
         if (taskType === TaskType.TEXT_TO_MOTION) {
@@ -1106,12 +1044,12 @@ ${expiryNote(task)}`
 
         // Creative Lab products can expose bespoke multi-part model_urls
         // (e.g. lamp → lamp_stl + base_stl, zip output → bundle_zip) that don't
-        // match the standard `format` keys. When the requested format isn't a
-        // direct key, download every available part.
+        // match the standard `format` keys. Unless one available format was
+        // asked for, download every available part.
         if (
           taskType.startsWith("creative-lab-") &&
           task.model_urls &&
-          !task.model_urls[fmt as keyof typeof task.model_urls]
+          !(params.format && task.model_urls[params.format as keyof typeof task.model_urls])
         ) {
           const parts = (Object.entries(task.model_urls) as [string, string][]).filter(([, v]) => Boolean(v));
           if (parts.length > 0) {
@@ -1214,11 +1152,11 @@ This task did not generate a 3MF file. 3MF is **not** included by default — it
             if (anim.running_fbx_url) lines.push(`- **FBX**: ${anim.running_fbx_url}`);
             if (anim.running_armature_glb_url) lines.push(`- **Armature GLB**: ${anim.running_armature_glb_url}`);
             lines.push("");
-            lines.push("**NOTE**: These animations were included FREE with rigging. Do NOT call `meshy_animate` for walking/running.");
+            lines.push("**NOTE**: These animations were included FREE with rigging; no `meshy_animate` call is needed for them.");
             lines.push("");
           }
 
-          lines.push(expiryNote(task));
+          lines.push(expiryNote(task, false));
 
           const output = {
             download_url: fmt === "fbx"
@@ -1248,7 +1186,7 @@ This task did not generate a 3MF file. 3MF is **not** included by default — it
           if (task.result.processed_armature_fbx_url) lines.push(`- **Armature FBX**: ${task.result.processed_armature_fbx_url}`);
           if (task.result.processed_animation_fps_fbx_url) lines.push(`- **FPS-converted FBX**: ${task.result.processed_animation_fps_fbx_url}`);
           lines.push("");
-          lines.push(expiryNote(task));
+          lines.push(expiryNote(task, false));
 
           const output = {
             download_url: fmt === "fbx"
@@ -1443,7 +1381,7 @@ This task did not generate a 3MF file. 3MF is **not** included by default — it
 **Download URL** (use manually):
 ${downloadUrl}
 
-${expiryNote(task)}`
+${expiryNote(task, false)}`
             }],
             structuredContent: output
           };

@@ -53,7 +53,7 @@ export const SendToSlicerInputSchema = z.object({
     .describe("File name for the model (default: meshy_model.3mf)"),
   is_multicolor: z.boolean()
     .default(false)
-    .describe("If true, only recommends multicolor-capable slicers (OrcaSlicer, Bambu Studio, Creality Print, Elegoo Slicer, Anycubic Slicer Next)"),
+    .describe("If true, only recommends multicolor-capable slicers (OrcaSlicer, Bambu Studio, Creality Print, Elegoo Slicer, Anycubic Slicer Next, PrusaSlicer)"),
   response_format: ResponseFormatSchema
 }).strict();
 
@@ -69,7 +69,7 @@ export const AnalyzePrintabilityInputSchema = z.object({
   input_task_id: TaskIdSchema.optional()
     .describe("ID of a SUCCEEDED task to analyze: text-to-3d, image-to-3d, multi-image-to-3d, remesh or retexture on Meshy 6 or newer (Meshy 7 / 7.1 included), or a print-repair task. Takes priority over model_url when both are given."),
   model_url: UrlSchema.optional()
-    .describe("Public URL of a 3D model to analyze (.glb / .gltf / .obj / .fbx / .stl, max 100 MB). Ignored when input_task_id is given."),
+    .describe("Public URL of a 3D model to analyze (.glb / .gltf / .obj / .fbx / .stl, max 100 MB), or a GLB data URI. Ignored when input_task_id is given."),
   ...printSizeFields,
   response_format: ResponseFormatSchema
 }).strict();
@@ -82,7 +82,7 @@ export const RepairPrintabilityInputSchema = z.object({
   input_task_id: TaskIdSchema.optional()
     .describe("ID of a SUCCEEDED task with a GLB: text-to-3d, image-to-3d, multi-image-to-3d, remesh, retexture, or a print-analyze task (an analyze task that checked wall thickness passes on its printer and size). Output will be GLB. Takes priority over model_url when both are given."),
   model_url: UrlSchema.optional()
-    .describe("Public URL of a 3D model to repair (.glb / .stl / .obj / .fbx / .gltf, max 100 MB). Output matches the input format (.glb/.stl/.obj/.fbx/.gltf). .fbx must be an https URL — it cannot be passed as a data: URI. Ignored when input_task_id is given."),
+    .describe("Public URL of a 3D model to repair (.glb / .stl / .obj / .fbx / .gltf, max 100 MB), or a GLB data URI. Output matches the input format. Ignored when input_task_id is given."),
   ...printSizeFields,
   alpha_thumbnail: z.boolean()
     .optional()
@@ -96,9 +96,9 @@ export const RepairPrintabilityInputSchema = z.object({
  */
 export const ProcessMulticolorInputSchema = z.object({
   input_task_id: TaskIdSchema.optional()
-    .describe("ID of a SUCCEEDED textured task. Run meshy_text_to_3d_refine or meshy_retexture first if needed. Takes priority over model_url when both are given."),
+    .describe("ID of a SUCCEEDED textured task: image-to-3d / multi-image-to-3d (textured unless should_texture was false), refined text-to-3d, remesh or retexture. Takes priority over model_url when both are given."),
   model_url: UrlSchema.optional()
-    .describe("Public URL of a textured 3D model (.glb / .fbx). Ignored when input_task_id is given."),
+    .describe("Public URL of a textured 3D model (.glb / .fbx), or a GLB data URI. Ignored when input_task_id is given."),
   max_colors: z.number()
     .int()
     .min(1, "Minimum 1 color")

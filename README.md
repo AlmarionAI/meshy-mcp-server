@@ -41,7 +41,8 @@
   - `process_multicolor` — 10-credit multi-color 3MF for AMS/MMU printers, `realistic` or `cartoon` style, with a slicer preset for 9 printer brands
   - `auto_split` (v0.6.3) — 10 credits: cut a model into printable parts automatically, by named parts, or by color, with optional connectors
 - **Usage reporting (v0.6.3)**: `list_usage` lists finished API tasks with their credits (Studio / Enterprise teams)
-- **Slicer Integration**: Auto-detect 7 installed slicers (OrcaSlicer, Bambu, Creality, Elegoo, Anycubic, PrusaSlicer, Cura) and return launch commands the agent can execute
+- **Model listing (v0.6.3)**: `list_models` lists finished 3D models of any model-producing task type (image-to-3d by default; pass `task_types` to widen), each with the `task_type` and formats to download
+- **Slicer Integration**: Auto-detect 7 installed slicers (OrcaSlicer, Bambu, Creality, Elegoo, Anycubic, PrusaSlicer, Cura; all but Cura open multi-color 3MF) and return launch commands the agent can execute
 - **Smart File Organization**: Auto-saves to `meshy_output/` with project folders, metadata, and history tracking
 - **Built-in Workflow Intelligence**: Server instructions guide the agent through correct tool chains for each use case
 

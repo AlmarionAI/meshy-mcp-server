@@ -49,7 +49,7 @@ For a format change only use meshy_convert (1 credit); to scale a model use mesh
 
 Args:
   - input_task_id (string, optional): SUCCEEDED text-to-3d (preview or refine), image-to-3d or retexture task
-  - model_url (string, optional): Public URL or data URI of a .glb / .gltf / .obj / .fbx / .stl model
+  - model_url (string, optional): Public URL of a .glb / .gltf / .obj / .fbx / .stl model, or a GLB data URI
     (Provide either input_task_id or model_url)
   - target_formats (array, optional): Output formats (default: ["glb"]). Options: "glb", "fbx", "obj", "usdz", "blend", "stl", "3mf"
   - topology (enum, optional): Mesh topology - "quad" or "triangle" (default)
@@ -304,6 +304,8 @@ Error Handling:
 
 Creates a skeletal rig for character models, enabling them to be animated. Rigging INCLUDES free walking + running animations.
 
+REQUIREMENT: a textured humanoid (biped) model with a clear body and limbs; untextured or non-humanoid models fail. model_url must be a .glb facing +Z.
+
 IMPORTANT: The source model should be generated with pose_mode="t-pose" for best rigging results. When the user asks to rig or animate, always ensure the generation step used t-pose. If the model was not generated with t-pose, recommend regenerating with pose_mode="t-pose" first.
 
 CONSTRAINT: Model must have ≤300,000 faces. This tool auto-checks and suggests remeshing if exceeded.
@@ -327,7 +329,8 @@ Returns:
 Included with rigging (FREE):
   - Walking animation (GLB + FBX)
   - Running animation (GLB + FBX)
-  Only call meshy_animate (3 credits) for CUSTOM animations beyond walking/running.
+
+Next steps: other actions → meshy_list_animations (find ids) → meshy_animate with rig_task_id; a described motion → meshy_text_to_motion → meshy_animate with motion_task_id.
 
 Examples:
   - Basic rig: { input_task_id: "abc-123" }
@@ -409,7 +412,7 @@ The model exceeds the ${maxFaces}-face limit for rigging.
           output,
           params.response_format,
           "Rigging Task Created",
-          `Rigging INCLUDES walking + running animations for free. Download with \`meshy_download_model\` (task_type "rigging").\nOnly call \`meshy_animate\` (3 credits) for CUSTOM animations beyond walking/running.`,
+          `Rigging INCLUDES walking + running animations for free, as separate files. \`meshy_download_model\` (task_type "rigging") returns their URLs.\n\`meshy_animate\` (3 credits per action) is for other actions, or walk/run bundled into one multi-clip file.`,
           "rigging"
         );
       } catch (error) {
@@ -431,7 +434,7 @@ The model exceeds the ${maxFaces}-face limit for rigging.
       title: "Animate Rigged 3D Character",
       description: `Apply a CUSTOM animation to a rigged 3D character using Meshy AI. Cost: 3 credits per action.
 
-NOTE: Walking and running animations are already FREE with meshy_rig. Only use this tool for CUSTOM animations (dancing, jumping, fighting, etc.) that are NOT included in rigging.
+NOTE: meshy_rig already returns walking and running free, as separate files. Use this tool for other actions; to get walk/run inside one multi-clip file, include their preset ids in action_ids (3 credits each).
 
 Give exactly ONE animation source:
   - action_id: one preset action. Find ids with meshy_list_animations (free) — never guess an id.
@@ -533,7 +536,7 @@ Error Handling:
       title: "Generate Motion Clip from Text",
       description: `Generate a character motion clip from a text description. Cost: ${TEXT_TO_MOTION_CREDITS.prime} credits (prime) or ${TEXT_TO_MOTION_CREDITS.swift} (swift) — confirm with the user first.
 
-The clip is skeleton motion, not a model. Apply it to a rigged character with meshy_animate (motion_task_id), or download it (meshy_download_model) for your own retargeting. Clips are kept for 3 days.
+The clip is skeleton motion, not a model. Apply it to a rigged character with meshy_animate (motion_task_id), or download it (meshy_download_model saves the FBX / BVH clip and ignores format) for your own retargeting. Clips are kept for 3 days.
 
 Args:
   - prompt (string): the motion, max 400 characters (required)

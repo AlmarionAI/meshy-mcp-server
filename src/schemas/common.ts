@@ -60,4 +60,13 @@ export const PromptSchema = z.string()
 export const TaskTypeSchema = z.preprocess(
   value => toTaskType(value),
   z.nativeEnum(TaskType).optional()
-).describe("Task type for endpoint routing, e.g. 'text-to-3d', 'image-to-3d', 'multi-image-to-3d', 'remesh', 'retexture', 'rigging', 'animation', 'text-to-image', 'image-to-image', 'convert', 'resize', 'uv-unwrap', 'multi-color-print', 'print-analyze', 'print-repair'. Creative Lab is STAGE-specific: 'creative-lab-{product}-prototype' or 'creative-lab-{product}-build'. Optional: if omitted, unrecognized or wrong, the server finds the task on the other endpoints and reports its actual type, so never fall back to manual HTTP.");
+).describe("Optional: if omitted or wrong, the server finds the task and reports its real type. The API's names (rig, animate, print-multi-color) work too.");
+
+/**
+ * Task type filter for listing: takes the same names, API spellings included,
+ * but an unknown value is rejected instead of silently listing every type.
+ */
+export const TaskTypeFilterSchema = z.preprocess(
+  value => toTaskType(value) ?? value,
+  z.nativeEnum(TaskType).optional()
+).describe("Only this task type (same names as meshy_get_task_status). Omit to query every type and merge the results.");

@@ -37,6 +37,21 @@ Sync with the public Meshy API as of 2026-10-12. Tools: 24 → 28.
 - `meshy_analyze_printability` no longer says "FDM" when another printer type is requested, and
   mentions the thin-wall check when a printer type or print size is given
 - Task output no longer prints `Phase: undefined` for tasks that have no phase
+- `meshy_download_model` saves every part of a Creative Lab task (lamp + base STLs, zips,
+  collapsible fidget STL + GLB) unless a `format` is given; `format` no longer silently
+  defaults to `glb` there. Rigging and animation downloads say they return URLs, not files
+- Tool text that led to wrong calls: the white-print flow repairs the OBJ (repair by task
+  outputs GLB, which `print_ready` cannot fix); a textured image-to-3d / multi-image task counts
+  as textured for multi-color, rigging and the game / AR flows; model data URIs are described
+  as GLB only; `meshy_animate` explains bundling walk/run into one file; Auto Split says it has no bed size
+  and `by_color` needs an image-based source; a failed Creative Lab prototype is refunded
+- A 409 no longer suggests deleting the task once it finishes; it says a running task cannot be
+  stopped and that deleting a finished one is permanent and needs `confirm_delete`
+- PrusaSlicer counts as multicolor-capable, matching `printer_brand: "prusa"`
+- `meshy_list_tasks` `task_type` takes the API's names (`rig`, `animate`, `print-multi-color`)
+  like the other task tools, and rejects unknown values. Without `task_type`, `offset` / `limit`
+  page through the merged list (it used to return `limit` tasks per type with no next page), and
+  types whose list request fails are reported in `failed_types`
 
 ### Added
 
@@ -62,10 +77,14 @@ Sync with the public Meshy API as of 2026-10-12. Tools: 24 → 28.
   stage); keychain `name_text` engraving; `build_options` and `output_format` for keychain,
   fridge-magnet, lamp and fidget-pixel; keycap `vertical_offset_mm`
 - Rigging, animation, Auto Split, Text to Motion and every Creative Lab task can be listed,
-  checked, downloaded and canceled
+  checked, downloaded (rigging and animation return their file URLs) and canceled
 
 ### Changed
 
+- `meshy_list_models` covers every model-producing task type instead of text-to-3d only
+  (image-to-3d by default, one request; `task_types` widens it). Each model carries its
+  `task_type` and downloadable formats. It no longer reads as a list of AI models, and the
+  `filter` / `workspace_id` arguments, which the API never honored, are ignored
 - `meshy_cancel_task` follows the API's DELETE: a PENDING task is refunded, an IN_PROGRESS task
   cannot be deleted (Creative Lab: canceled without refund), and deleting a finished task, which
   removes its files, needs `confirm_delete: true`

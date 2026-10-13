@@ -48,7 +48,7 @@ Returns:
   }
 
 Next Steps:
-  Use meshy_get_task_status with task_id and task_type="text-to-image" to check progress.
+  Use meshy_get_task_status with task_id and task_type="text-to-image" to check progress, then show the image. To turn it into 3D: meshy_image_to_3d with input_task_id = this task (multi-view output: meshy_multi_image_to_3d).
 
 Examples:
   - Basic image: { ai_model: "nano-banana", prompt: "a cute cartoon cat" }
@@ -137,6 +137,8 @@ Other Args:
   - aspect_ratio (enum, optional): Output aspect ratio, same options as meshy_text_to_image
   - remove_background (boolean, optional): Transparent-background PNG (default false)
   - response_format (enum): Output format (default: "markdown")
+
+Next Steps: to turn the result into 3D, meshy_image_to_3d with input_task_id = this task (multi-view output: meshy_multi_image_to_3d).
 
 Examples:
   - Local file: { ai_model: "nano-banana", prompt: "make it a robot", reference_file_paths: ["/path/to/image.jpg"] }

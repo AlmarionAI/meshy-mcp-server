@@ -23,7 +23,7 @@ import {
   MISSING_API_KEY_MESSAGE,
   INVALID_API_KEY_MESSAGE
 } from "./error-handler.js";
-import { GetTaskResponse } from "../types.js";
+import { GetTaskResponse, Task } from "../types.js";
 import { USER_AGENT } from "../version.js";
 import { getTaskEndpoint, PROBE_TASK_TYPES, toTaskType } from "../utils/endpoints.js";
 
@@ -192,6 +192,68 @@ export async function getTaskWithAutoInference(
   }
 
   throw new Error(`Task ${taskId} not found on any endpoint. Verify the task_id is correct.`);
+}
+
+export interface ListedTask {
+  task: Task;
+  taskType: TaskType;
+}
+
+/**
+ * List tasks of several types as one list: fetch the first offset+limit tasks
+ * of each type in parallel, keep the ones `keep` accepts, merge by created_at
+ * and cut the [offset, offset + limit) window. A type whose list request fails
+ * is reported in `failed`; if every type fails, the first error is thrown.
+ *
+ * ponytail: `keep` filters after fetching, so a type whose fetched tasks are
+ * mostly filtered out can hide matches past its window (has_more stays true);
+ * a deep offset fetches every page up to offset + limit for each type.
+ */
+export async function listAcrossTypes(
+  client: MeshyClient,
+  types: TaskType[],
+  opts: { sortBy: "+created_at" | "-created_at"; offset: number; limit: number; keep?: (task: Task) => boolean }
+): Promise<{ items: ListedTask[]; hasMore: boolean; failed: TaskType[] }> {
+  const want = opts.offset + opts.limit;
+  const pageSize = Math.min(100, want);
+  const pages = Math.ceil(want / pageSize);
+  const results = await Promise.allSettled(types.map(async taskType => {
+    const tasks: Task[] = [];
+    let full = false;
+    for (let page = 1; page <= pages; page++) {
+      const batch = await client.get<Task[]>(getTaskEndpoint(taskType), {
+        page_size: pageSize,
+        page_num: page,
+        sort_by: opts.sortBy
+      });
+      const list = Array.isArray(batch) ? batch : [];
+      tasks.push(...list);
+      full = list.length >= pageSize;
+      if (!full) break;
+    }
+    return { tasks, full };
+  }));
+
+  const items: ListedTask[] = [];
+  const failed: TaskType[] = [];
+  let more = false;
+  results.forEach((result, i) => {
+    if (result.status === "rejected") {
+      failed.push(types[i]);
+      return;
+    }
+    more ||= result.value.full;
+    for (const task of result.value.tasks) {
+      if (!opts.keep || opts.keep(task)) items.push({ task, taskType: types[i] });
+    }
+  });
+  if (types.length > 0 && failed.length === types.length) {
+    throw (results[0] as PromiseRejectedResult).reason;
+  }
+
+  const time = (t: Task) => new Date(t.created_at).getTime();
+  items.sort((a, b) => opts.sortBy === "+created_at" ? time(a.task) - time(b.task) : time(b.task) - time(a.task));
+  return { items: items.slice(opts.offset, want), hasMore: more || items.length > want, failed };
 }
 
 const FINAL_STATUSES = new Set<string>([TaskStatus.SUCCEEDED, TaskStatus.FAILED, TaskStatus.CANCELED]);

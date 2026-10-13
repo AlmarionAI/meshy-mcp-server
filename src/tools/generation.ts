@@ -36,7 +36,7 @@ export function registerGenerationTools(server: McpServer, client: MeshyClient) 
       title: "Generate 3D Model from Text",
       description: `Generate a 3D model from a text description using Meshy AI.
 
-PREFER THE IMAGE ROUTE: for higher quality and more control, generate a design image first (meshy_text_to_image) then meshy_image_to_3d. Use direct text-to-3d for a quick draft or when the user explicitly asks for it.
+PREFER THE IMAGE ROUTE: for higher quality and more control, generate a design image first (meshy_text_to_image), let the user approve it, then meshy_image_to_3d with input_task_id = the image task (textured in one task). Use direct text-to-3d for a quick draft or when the user explicitly asks for it.
 
 This tool creates a new 3D generation task and returns a task_id that can be used to poll the status. The generation process is asynchronous and typically takes 2-3 minutes.
 
@@ -162,10 +162,11 @@ Examples:
 
 This tool creates a new 3D generation task from an image and returns a task_id.
 
-IMAGE INPUT (provide ONE, NEVER both):
+IMAGE INPUT (provide exactly ONE):
   - Local file → file_path: "/absolute/path/to/image.jpg" (RECOMMENDED)
   - Remote URL → image_url: "https://example.com/image.jpg"
-  - NEVER manually base64-encode. NEVER use both file_path and image_url.
+  - Image you generated → input_task_id: a SUCCEEDED meshy_text_to_image / meshy_image_to_image task with ONE image (multi-view output → meshy_multi_image_to_3d)
+  - NEVER manually base64-encode.
 
 Other Args:
   - ai_model: "latest" (default, = Meshy 7.1) / "meshy-7.1" / "meshy-6" (20 mesh, 30 textured), "meshy-6-lite" (5 / 15, 2K textures only) for standard; "meshy-t2" (5 / 15) for Smart Topology. "meshy-7" is deprecated. Ask the user which model and confirm the cost first
@@ -437,6 +438,7 @@ Use multiple views of the same object for better 3D reconstruction.
 Image Input (provide ONE of these):
   - image_urls (array): 1–4 publicly accessible image URLs
   - file_paths (array): 1–4 absolute paths to LOCAL image files. Server reads and encodes them automatically.
+  - input_task_id: a SUCCEEDED meshy_text_to_image / meshy_image_to_image task (multi-view included); its 1–4 images are the input
 
 IMPORTANT: For local files, always use file_paths instead of manually base64-encoding.
 

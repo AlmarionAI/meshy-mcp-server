@@ -123,7 +123,7 @@ export const ImageTo3DInputSchema = z.object({
     .describe("ABSOLUTE path to LOCAL image (.jpg/.jpeg/.png/.webp). PREFERRED for local files. Server auto-encodes. Example: /Users/me/photo.jpg. NEVER manually base64-encode."),
   input_task_id: z.string()
     .optional()
-    .describe("Chain from a SUCCEEDED text-to-image or image-to-image task: use its generated image as the input instead of image_url/file_path. Provide only one image source."),
+    .describe("Chain from a SUCCEEDED text-to-image or image-to-image task with exactly one image: use it as the input instead of image_url/file_path. Provide only one image source."),
   ai_model: z.union([z.nativeEnum(AIModel), z.nativeEnum(SmartTopologyModel)])
     .optional()
     .describe("Standard (model_type standard): 'latest' (default, = Meshy 7.1) or 'meshy-7.1' = best quality; 'meshy-6'; 'meshy-6-lite' = fast and cheap, 2K textures only. 'meshy-7' is deprecated (use meshy-7.1). Smart Topology (model_type smart-topology): 'meshy-t2' (default) = clean part-separated mesh at a set face count. Credits: meshy-7.1/latest/meshy-6 20 mesh-only, 30 textured (35 at 8K); meshy-6-lite 5 / 15; meshy-t2 5 / 15 (20 at 8K). IMPORTANT: ask the user which model to use and confirm the cost first."),

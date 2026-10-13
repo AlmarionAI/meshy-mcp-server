@@ -104,7 +104,7 @@ test("a task only its own route serves is still found, and real errors are not s
 test("402, 409 and task errors carry the server's message and the next step", () => {
   assert.match(handleMeshyError(httpError("post", 402, "Insufficient funds")), /Insufficient funds.*meshy_check_balance/);
   const busy = "Task is IN_PROGRESS and cannot be deleted. Credits for a task the worker has already started are not refundable";
-  assert.match(handleMeshyError(httpError("delete", 409, busy)), /Conflict \(409\)\. Task is IN_PROGRESS.*SUCCEEDED, FAILED or CANCELED/);
+  assert.match(handleMeshyError(httpError("delete", 409, busy)), /Conflict \(409\)\. Task is IN_PROGRESS.*not refundable\. A running task cannot be stopped.*confirm_delete/);
   assert.equal(
     describeTaskError({ type: "invalid_input", code: "image_too_complex", message: "Too complex.", doc_url: "https://docs.meshy.ai/x" }),
     "[invalid_input/image_too_complex] Too complex. (guide: https://docs.meshy.ai/x)",

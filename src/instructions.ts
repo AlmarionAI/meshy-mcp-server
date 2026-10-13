@@ -7,6 +7,8 @@
 export const MESHY_INSTRUCTIONS = `
 # Meshy AI — Workflow Guide
 
+Earlier results: meshy_list_models lists finished 3D models (image-to-3d by default; task_types widens it); meshy_list_tasks lists every task, unfinished ones included.
+
 ## Rule 1: Cost Confirmation
 Before calling ANY tool that costs credits, present the cost and wait for user confirmation.
 
@@ -60,7 +62,7 @@ If a create call fails with a timeout, network error or 5xx, the task may still 
 The API parameter target_formats controls which formats are produced. Decide the output format before calling any generation tool, because target_formats must be set at creation time. Ask user about their intended use first.
 
 ## Rule 4: Identify the Use Case, Then Confirm with User
-Determine which scenario below best matches, present a suggested plan to the user, and confirm before executing. Do not mix steps across scenarios.
+Determine which scenario below best matches, present a suggested plan to the user, and confirm before executing. When a request spans several scenarios (e.g. A then L), combine their steps and confirm the combined plan.
 
 ---
 
@@ -70,10 +72,10 @@ Each scenario below is a recommended workflow. Discuss with the user to confirm 
 Trigger: user mentions print, slicer, figurine, miniature, statue, physical model — single-color.
 Suggested flow:
 1. Detect installed slicers (meshy_send_to_slicer, slicer_type:"auto") — present list, save for later
-2. Generate untextured model (text-to-3d or image-to-3d) with target_formats:["obj"]
+2. Generate an untextured model with target_formats:["obj"]: meshy_text_to_3d (preview), or meshy_image_to_3d with should_texture:false
 3. Wait for completion
-4. Optionally check printability (meshy_analyze_printability, free; pass printer_type and a print size to also check wall thickness), and repair if it reports errors
-5. Download OBJ with print_ready=true (auto coordinate fix for slicer)
+4. Optionally check printability (meshy_analyze_printability, free; pass printer_type and a print size to also check wall thickness). If it reports errors, repair with model_url = the generation task's OBJ URL (model_urls.obj) so the result stays OBJ; repair by input_task_id outputs GLB, which print_ready cannot fix
+5. Download the OBJ (the repair task's, if repaired) with print_ready=true and print_height_mm (local Z-up fix and scaling)
 6. Present slicer list from step 1, ask user which to use, execute launch_command via Bash
 If the model must be printed in pieces (too big for the bed, separate colors or materials), use Scenario L.
 
@@ -81,17 +83,17 @@ If the model must be printed in pieces (too big for the bed, separate colors or 
 Trigger: user wants multicolor/color print.
 Suggested flow:
 1. Detect multicolor-capable slicers (meshy_send_to_slicer, is_multicolor:true) — present list, save for later
-2. Generate a textured model — via text-to-3d (preview + refine) or image-to-3d with textures
+2. Generate a textured model — image-to-3d / multi-image-to-3d (textured by default), or text-to-3d preview + refine
 3. Multi-color processing (meshy_process_multicolor) with input_task_id from the textured task — 10 credits, outputs 3MF. Ask for style (realistic / cartoon) and printer_brand (writes that brand's slicer preset; default bambu)
 4. Wait for completion (task_type:"multi-color-print")
-5. Download 3MF
+5. Download with format "3mf"
 6. Present slicer list from step 1, ask user which to use, execute launch_command via Bash
 
 ## Scenario C: Game Engine (Unity/Unreal/Godot)
 Trigger: user mentions game, Unity, Unreal, Godot, game-ready.
 Suggested flow:
 1. Generate model with target_formats:["fbx"]
-2. Add textures (refine or retexture)
+2. Textures: image-to-3d / multi-image output is already textured (unless should_texture:false); a text-to-3d preview needs meshy_text_to_3d_refine
 3. Inspect topology and face count. Smart Topology may already meet the budget; remesh only if needed and separately approved
 4. Download FBX
 
@@ -99,17 +101,17 @@ Suggested flow:
 Trigger: user mentions rig, animate, walking, running, character animation.
 Suggested flow:
 1. Generate model with pose_mode:"t-pose"
-2. Add textures (refine or retexture)
+2. Textures (rigging needs a textured humanoid): image-to-3d / multi-image output is already textured (unless should_texture:false); a text-to-3d preview needs meshy_text_to_3d_refine
 3. Rig the model (meshy_rig, ≤300K faces; if over, remesh to reduce polycount first)
-4. Download — rigging includes walking+running free. Only use meshy_animate for custom animations:
-   - preset actions: look up action ids with meshy_list_animations (free) — never guess ids. action_ids puts up to 10 clips in one file (3 credits each)
+4. Download — rigging includes walking+running free, as separate files. For other actions use meshy_animate:
+   - preset actions: look up action ids with meshy_list_animations (free) — never guess ids. action_ids puts up to 10 clips in one file (3 credits each; include the walk/run ids to bundle them too)
    - a described motion ("a backflip into a crouch"): meshy_text_to_motion (prime 10 / swift 3 credits), then meshy_animate with motion_task_id (biped rigs only)
 
 ## Scenario E: AR / Apple
 Trigger: user mentions AR, USDZ, Vision Pro, Quick Look.
 Suggested flow:
 1. Generate model with target_formats:["usdz"]
-2. Add textures (refine or retexture)
+2. Textures: image-to-3d / multi-image output is already textured (unless should_texture:false); a text-to-3d preview needs meshy_text_to_3d_refine
 3. If the model has no USDZ yet, convert it (meshy_convert, target_formats:["usdz"], 1 credit)
 4. Download USDZ
 
@@ -141,7 +143,7 @@ Trigger: user wants a stylized physical-product model from a photo — chibi fig
 Suggested flow:
 1. Confirm the cost: 36 credits for figure / vinyl-figure / brick-figure / keychain / fridge-magnet / lamp / fidget-pixel, **62 for keycap**, **6 for fidget-collapsible**.
 2. Call meshy_creative_lab once with product + an image source (file_path / image_url). It runs the whole pipeline internally and returns the final 3D model — the intermediate concept image is internal and is NOT shown to the user. Product options: keychain name_text (engraving, ≤10 characters); fidget-pixel pixel_subject (person / other, required); keycap head_size_mm / vertical_offset_mm; build_options and output_format for keychain, fridge-magnet, lamp and fidget-pixel.
-3. Download the result with meshy_download_model and the task_type the tool reports; every part is saved (e.g. lamp + base STLs).
+3. Download the result with meshy_download_model and the task_type the tool reports; omit format to save every part (e.g. lamp + base STLs).
 
 ## Scenario K: Cleaner Topology / Part-Separated Geometry (cheaply)
 Trigger: user wants an editable, part-separated, or lower-poly model from an image or text.
@@ -155,14 +157,13 @@ Suggested flow:
 Trigger: model is too big for the print bed, or parts should be printed separately / in different colors and assembled.
 Suggested flow:
 1. Source must be a SUCCEEDED image-to-3d, multi-image-to-3d, text-to-3d preview, remesh, convert or resize task on Meshy 6 / 7 / 7.1 (not low-poly or Smart Topology).
-2. Confirm 10 credits and how to cut: mode "auto", or "by_parts" / "by_color" with a prompt naming 1–10 parts. Offer connectors so the pieces fit together, layout "on_plate" for print-ready placement, and target_formats ["3mf"] for separately selectable parts in a slicer.
-3. meshy_auto_split, wait (task_type "print-split"), then meshy_download_model.
+2. Confirm 10 credits and how to cut: mode "auto", "by_parts" with a prompt naming 1–10 parts, or "by_color" (image-to-3d / multi-image-to-3d sources only). There is no bed-size parameter: resize to the print size first if parts must fit a bed. Offer connectors so the pieces fit together, layout "on_plate" for print-ready placement, and target_formats ["3mf"] for separately selectable parts in a slicer.
+3. meshy_auto_split, wait (task_type "print-split"), meshy_download_model, then open the file in a slicer (meshy_send_to_slicer).
 
 ## Scenario G: General 3D Model (default)
 Trigger: none of the above.
 Suggested flow:
 1. Ask user about intended use to determine format
-2. Generate model
-3. Ask: add textures (refine)?
-4. Download in chosen format
+2. From text, offer the image route (meshy_text_to_image → user approves the image → meshy_image_to_3d with input_task_id; textured in one task), or a quick meshy_text_to_3d preview (+ meshy_text_to_3d_refine for textures)
+3. Download in chosen format
 `;

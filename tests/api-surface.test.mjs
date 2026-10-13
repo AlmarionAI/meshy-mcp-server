@@ -6,6 +6,7 @@ import { registerImageTools } from "../dist/tools/image.js";
 import { registerBalanceTool } from "../dist/tools/balance.js";
 import { registerCreativeLabTools } from "../dist/tools/creative-lab.js";
 import { registerTaskTools } from "../dist/tools/tasks.js";
+import { registerWorkspaceTools } from "../dist/tools/workspace.js";
 
 // Offline request checks for the endpoints and options added or changed in 0.6.3.
 // The fake client answers every GET with a finished task of the type the path
@@ -262,4 +263,66 @@ test("retexture on meshy-6-lite suggests models retexture accepts", async () => 
   const text = await h.invalid("meshy_retexture", { input_task_id: "t", text_style_prompt: "gold", ai_model: "meshy-6-lite", texture_resolution: "4k" });
   assert.match(text, /meshy-6, meshy-7 or latest/);
   assert.doesNotMatch(text, /7\.1/);
+});
+
+test("download saves every Creative Lab part unless a format is asked for", async () => {
+  const { createServer } = await import("node:http");
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const server = createServer((req, res) => res.end(req.url));
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "meshy-dl-"));
+  try {
+    const lamp = () => ({
+      id: "t",
+      type: "creative-lab-lamp-build",
+      status: "SUCCEEDED",
+      model_urls: { glb: `${base}/lamp.glb`, lamp_stl: `${base}/lamp.stl`, base_stl: `${base}/base.stl` },
+    });
+    const h = createHarness(registerTaskTools, { "/openapi/creative-lab/lamp/v1/build/t": lamp });
+    const all = await h.run("meshy_download_model", { task_id: "t", task_type: "creative-lab-lamp-build", save_to: path.join(dir, "all.stl") });
+    assert.equal(all.structuredContent.count, 3, JSON.stringify(all));
+    const one = await h.run("meshy_download_model", { task_id: "t", task_type: "creative-lab-lamp-build", format: "glb", save_to: path.join(dir, "one.glb") });
+    assert.equal(one.structuredContent.format, "glb", JSON.stringify(one));
+    assert.equal(fs.readFileSync(path.join(dir, "one.glb"), "utf-8"), "/lamp.glb");
+  } finally {
+    server.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("list_tasks takes the API's task type names and rejects unknown ones", async () => {
+  const h = createHarness(registerTaskTools, { "/openapi/v1/rigging": [] });
+  const schema = h.schema("meshy_list_tasks");
+  assert.equal(schema.parse({ task_type: "rig" }).task_type, "rigging");
+  assert.equal(schema.safeParse({ task_type: "nope" }).success, false);
+  await h.run("meshy_list_tasks", { task_type: "rig" });
+  assert.deepEqual(h.gets.map((g) => g.path), ["/openapi/v1/rigging"]);
+});
+
+test("list_models asks only image-to-3d by default and merges the types it is given", async () => {
+  const done = (id, created_at, extra = { model_urls: { glb: "u" } }) => ({ id, status: "SUCCEEDED", created_at, ...extra });
+  const h = createHarness(registerWorkspaceTools, {
+    "/openapi/v1/image-to-3d": [done("i1", 300), done("i2", 100), { id: "i3", status: "FAILED", created_at: 400 }],
+    "/openapi/v2/text-to-3d": [done("t1", 200)],
+    "/openapi/v1/rigging": [done("r1", 250, { result: { rigged_character_glb_url: "u" } })],
+    "/openapi/v1/remesh": () => { throw new Error("down"); },
+  });
+  const first = await h.run("meshy_list_models", {});
+  assert.deepEqual(h.gets.map((g) => g.path), ["/openapi/v1/image-to-3d"]);
+  assert.deepEqual(first.structuredContent.models.map((m) => m.id), ["i1", "i2"]);
+  assert.equal(first.structuredContent.has_more, false);
+
+  const merged = await h.run("meshy_list_models", { task_types: ["image-to-3d", "text-to-3d", "rig", "remesh"], offset: 1, limit: 2 });
+  assert.deepEqual(merged.structuredContent.models.map((m) => [m.id, m.task_type, m.formats.join()]), [
+    ["r1", "rigging", "glb"],
+    ["t1", "text-to-3d", "glb"],
+  ]);
+  assert.equal(merged.structuredContent.has_more, true);
+  assert.equal(merged.structuredContent.next_offset, 3);
+  assert.deepEqual(merged.structuredContent.failed_types, ["remesh"]);
+  assert.equal(h.gets.at(-1).query.page_size, 3);
+  assert.equal(h.schema("meshy_list_models").safeParse({ task_types: ["text-to-image"] }).success, false);
 });

@@ -226,7 +226,8 @@ export const MULTICOLOR_CAPABLE_SLICERS: SlicerType[] = [
   SlicerType.BAMBU,
   SlicerType.CREALITY_PRINT,
   SlicerType.ELEGOO_SLICER,
-  SlicerType.ANYCUBIC_SLICER
+  SlicerType.ANYCUBIC_SLICER,
+  SlicerType.PRUSASLICER
 ];
 
 // Printing credit costs

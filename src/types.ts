@@ -322,7 +322,6 @@ export interface Task {
   prompt?: string;
   preceding_tasks?: number;
   task_error?: TaskError;
-  is_published?: boolean;
 
   // Rigging tasks use a nested "result" with different URL fields
   result?: {
@@ -453,10 +452,11 @@ export interface PaginatedResponse<T> {
 // Model Summary (for listing)
 export interface ModelSummary {
   id: string;
+  task_type: string;
   name: string;
-  thumbnail_url: string;
+  formats: string[];
+  thumbnail_url?: string;
   created_at: string | number;
   vertex_count?: number;
   face_count?: number;
-  is_published: boolean;
 }
