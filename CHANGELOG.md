@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- Tool descriptions for `model_url`: an `http`/`https` URL can now point to a model up to 400 MB
+  (the Meshy API raised its limit on 2026-10-14); a `data:` URI stays at 100 MB. Files over 100 MB
+  are limited to 10M faces (8M for multi-color) by the API.
+
 ## [0.6.4] - 2026-10-13
 
 ### Added

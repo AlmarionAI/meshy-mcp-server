@@ -69,7 +69,7 @@ export const AnalyzePrintabilityInputSchema = z.object({
   input_task_id: TaskIdSchema.optional()
     .describe("A SUCCEEDED text-to-3d, image-to-3d, multi-image-to-3d, remesh or retexture task on Meshy 6 or newer, or a print-repair task. Wins over model_url."),
   model_url: UrlSchema.optional()
-    .describe("Public URL of a .glb / .gltf / .obj / .fbx / .stl model (max 100 MB), or a GLB data URI."),
+    .describe("Public URL of a .glb / .gltf / .obj / .fbx / .stl model (max 400 MB), or a GLB data URI (max 100 MB)."),
   ...printSizeFields,
   response_format: ResponseFormatSchema
 }).strict();
@@ -82,7 +82,7 @@ export const RepairPrintabilityInputSchema = z.object({
   input_task_id: TaskIdSchema.optional()
     .describe("A SUCCEEDED text-to-3d, image-to-3d, multi-image-to-3d, remesh or retexture task, or a print-analyze task (which passes on its printer and size). Wins over model_url."),
   model_url: UrlSchema.optional()
-    .describe("Public URL of a .glb / .gltf / .obj / .fbx / .stl model (max 100 MB), or a GLB data URI."),
+    .describe("Public URL of a .glb / .gltf / .obj / .fbx / .stl model (max 400 MB), or a GLB data URI (max 100 MB)."),
   ...printSizeFields,
   alpha_thumbnail: z.boolean()
     .optional()

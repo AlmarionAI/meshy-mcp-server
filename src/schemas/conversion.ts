@@ -17,7 +17,7 @@ export const ConvertInputSchema = z.object({
   input_task_id: TaskIdSchema.optional()
     .describe("A SUCCEEDED task with a model. Wins over model_url."),
   model_url: UrlSchema.optional()
-    .describe("Public URL of a .glb / .gltf / .obj / .fbx / .stl model (max 100 MB), or a GLB data URI."),
+    .describe("Public URL of a .glb / .gltf / .obj / .fbx / .stl model (max 400 MB), or a GLB data URI (max 100 MB)."),
   target_formats: z.array(z.nativeEnum(ConvertFormat))
     .min(1, "At least one target format is required")
     .describe("Formats to produce"),

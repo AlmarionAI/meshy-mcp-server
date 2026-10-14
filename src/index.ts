@@ -141,8 +141,10 @@ async function runHTTP() {
 
   const app = express();
   // Allow large request bodies so callers can pass `model_url` as a `data:` URI
-  // for the print/analyze, print/repair, and print/multi-color tools. Meshy's
-  // own model_url upload limit is 100 MB; we mirror that here.
+  // for the print/analyze, print/repair, and print/multi-color tools. Meshy
+  // accepts a data: URI model up to 100 MB (an http(s) URL up to 400 MB, which
+  // never passes through this body). The cap applies to the whole JSON body, so
+  // with base64 an inline model tops out near 75 MB.
   app.use(express.json({ limit: "100mb" }));
 
   // Health check endpoint

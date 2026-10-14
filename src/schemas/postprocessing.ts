@@ -16,7 +16,7 @@ export const RemeshInputSchema = z.object({
     .describe("A SUCCEEDED text-to-3d (preview or refine), image-to-3d or retexture task"),
   model_url: UrlSchema
     .optional()
-    .describe("Public URL of a .glb / .gltf / .obj / .fbx / .stl model (max 100 MB), or a GLB data URI"),
+    .describe("Public URL of a .glb / .gltf / .obj / .fbx / .stl model (max 400 MB), or a GLB data URI (max 100 MB)"),
   target_formats: z.array(z.enum(["glb", "fbx", "obj", "usdz", "blend", "stl", "3mf"]))
     .default(["glb"])
     .describe("Formats to produce (default ['glb'])."),
@@ -66,7 +66,7 @@ export const RetextureInputSchema = z.object({
     .describe("A SUCCEEDED text-to-3d (preview or refine), image-to-3d or remesh task"),
   model_url: UrlSchema
     .optional()
-    .describe("Public URL of a .glb / .gltf / .obj / .fbx / .stl model (max 100 MB), or a GLB data URI"),
+    .describe("Public URL of a .glb / .gltf / .obj / .fbx / .stl model (max 400 MB), or a GLB data URI (max 100 MB)"),
   text_style_prompt: z.string()
     .max(800, "Prompt must not exceed 800 characters")
     .optional()
@@ -116,7 +116,7 @@ export const RigInputSchema = z.object({
     .describe("A SUCCEEDED task with a textured humanoid model"),
   model_url: UrlSchema
     .optional()
-    .describe("Public URL of a textured humanoid .glb (max 100 MB), or a GLB data URI"),
+    .describe("Public URL of a textured humanoid .glb (max 400 MB), or a GLB data URI (max 100 MB)"),
   height_meters: z.number()
     .default(1.7)
     .describe("Character height in meters; helps scaling"),
