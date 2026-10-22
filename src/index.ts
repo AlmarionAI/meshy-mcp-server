@@ -21,6 +21,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import express from "express";
 import { createMeshyClient } from "./services/meshy-client.js";
+import type { HostInfo } from "./utils/user-agent.js";
 import { registerGenerationTools } from "./tools/generation.js";
 import { registerTaskTools } from "./tools/tasks.js";
 import { registerWorkspaceTools } from "./tools/workspace.js";
@@ -40,12 +41,13 @@ const server = new McpServer(
 );
 
 /**
- * Initialize server and register tools
+ * Initialize server and register tools. `clientInfo` names the connected MCP
+ * client in the API User-Agent.
  */
-async function initializeServer() {
+async function initializeServer(clientInfo?: () => HostInfo | undefined) {
   try {
     // Create Meshy API client (the key is checked on the first tool call)
-    const meshyClient = createMeshyClient();
+    const meshyClient = createMeshyClient(clientInfo);
     console.error("✓ Meshy client initialized");
 
     // Register all tools
@@ -122,7 +124,8 @@ function stripSchemaDialect(transport: Transport): Transport {
 async function runStdio() {
   console.error("Starting Meshy MCP Server (stdio mode)...");
 
-  await initializeServer();
+  // One client per process, so its handshake clientInfo names the host.
+  await initializeServer(() => server.server.getClientVersion());
 
   const transport = new StdioServerTransport();
   await server.connect(stripSchemaDialect(transport));
@@ -137,6 +140,8 @@ async function runStdio() {
 async function runHTTP() {
   console.error("Starting Meshy MCP Server (HTTP mode)...");
 
+  // No clientInfo: one stateless server answers every caller, so the last
+  // handshake seen need not be the caller's. MESHY_CLIENT still applies.
   await initializeServer();
 
   const app = express();

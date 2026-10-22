@@ -25,6 +25,7 @@ import {
 } from "./error-handler.js";
 import { GetTaskResponse, Task } from "../types.js";
 import { USER_AGENT } from "../version.js";
+import { HostInfo, parseHost, userAgent } from "../utils/user-agent.js";
 import { getTaskEndpoint, PROBE_TASK_TYPES, toTaskType } from "../utils/endpoints.js";
 
 export class MeshyClient {
@@ -35,7 +36,8 @@ export class MeshyClient {
   // sending more requests that are bound to be rejected.
   private keyRejected = false;
 
-  constructor(apiKey: string | undefined) {
+  /** `getUserAgent` runs per request: the MCP host is only known after the handshake. */
+  constructor(apiKey: string | undefined, private getUserAgent: () => string = () => USER_AGENT) {
     this.apiKey = apiKey;
 
     this.client = axios.create({
@@ -43,14 +45,14 @@ export class MeshyClient {
       timeout: API_TIMEOUT,
       headers: {
         "Content-Type": "application/json",
-        "Accept": "application/json",
-        "User-Agent": USER_AGENT
+        "Accept": "application/json"
       }
     });
 
-    // Add request interceptor to inject auth token
+    // Add request interceptor to inject auth token and User-Agent
     this.client.interceptors.request.use((config) => {
       config.headers.Authorization = `Bearer ${this.apiKey}`;
+      config.headers["User-Agent"] = this.getUserAgent();
       return config;
     });
   }
@@ -334,13 +336,17 @@ export async function pollTask(
  * MCP hosts restart a server that exits, so failing here turned every install
  * with a bad key into a restart loop hitting the API (ENG-3924). Instead each
  * tool call returns the auth error, which the user sees in the chat.
+ *
+ * The User-Agent names the host app: MESHY_CLIENT ("name[/version]", set by an
+ * integrator) if usable, else `clientInfo()`, the connected MCP client.
  */
-export function createMeshyClient(): MeshyClient {
+export function createMeshyClient(clientInfo: () => HostInfo | undefined = () => undefined): MeshyClient {
   const apiKey = process.env.MESHY_API_KEY?.trim();
+  const configured = parseHost(process.env.MESHY_CLIENT);
 
   if (!apiKey) {
     console.error(`Warning: ${MISSING_API_KEY_MESSAGE}`);
   }
 
-  return new MeshyClient(apiKey);
+  return new MeshyClient(apiKey, () => userAgent(configured, clientInfo()));
 }

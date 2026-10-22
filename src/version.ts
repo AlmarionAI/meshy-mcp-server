@@ -28,5 +28,5 @@ function readVersion(): string {
 
 export const VERSION = readVersion();
 
-/** User-Agent sent on every Meshy API call, e.g. "meshy-mcp-server/0.5.0". */
+/** Leading User-Agent token on every Meshy API call, e.g. "meshy-mcp-server/0.6.5" (see utils/user-agent). */
 export const USER_AGENT = `meshy-mcp-server/${VERSION}`;

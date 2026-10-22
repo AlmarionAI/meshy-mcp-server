@@ -173,6 +173,7 @@ Most clients auto-load the new server, but **Cursor and VS Code require a manual
 | `TRANSPORT` | Transport mode: `stdio` or `http` | `stdio` |
 | `PORT` | Port for HTTP transport | `3000` |
 | `CHARACTER_LIMIT` | Max response size in characters | `25000` |
+| `MESHY_CLIENT` | Optional. Identifies the integrating app in Meshy's logs, format `name/version` (e.g. `hermes-meshy-plugin/0.4.0`) | — |
 
 ## Development
 

@@ -1,6 +1,15 @@
 # Changelog
 
-## [Unreleased]
+## [0.6.5] - 2026-10-21
+
+### Added
+
+- The User-Agent on Meshy API calls names the app running the server in a trailing comment:
+  `meshy-mcp-server/0.6.5 (hermes-agent/0.22.2)`. The name comes from the new `MESHY_CLIENT`
+  environment variable (`name` or `name/version`, set by an integrator in its MCP config) or,
+  over stdio, from the MCP client's `clientInfo`; `MESHY_CLIENT` wins. Only letters, digits,
+  `.`, `_` and `-` are kept (name up to 64 characters, version up to 32). With neither, the
+  User-Agent stays `meshy-mcp-server/<version>`. Over HTTP, `clientInfo` is not used
 
 ### Changed
 
